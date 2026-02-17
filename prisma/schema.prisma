@@ -1,0 +1,267 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ==========================================
+// CORE ENTITIES
+// ==========================================
+
+enum LeagueType {
+  CLASSIC
+  MANTRA
+}
+
+enum TransactionType {
+  AUCTION
+  TRADE
+  RELEASE
+  LOAN_IN
+  LOAN_OUT
+  DEFAULT_SALE
+  INSURANCE_PAYOUT
+}
+
+enum MarketPeriod {
+  SUMMER
+  WINTER
+}
+
+model League {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  type      LeagueType
+  createdAt DateTime   @default(now())
+
+  seasons Season[]
+  teams   Team[]
+}
+
+model Team {
+  id        String   @id @default(cuid())
+  name      String
+  leagueId  String
+  createdAt DateTime @default(now())
+
+  league       League         @relation(fields: [leagueId], references: [id])
+  seasonTeams  SeasonTeam[]
+
+  @@unique([leagueId, name])
+}
+
+model Season {
+  id              String   @id @default(cuid())
+  leagueId        String
+  label           String   // e.g. "2025/2026"
+  startDate       DateTime
+  firstMatchday   DateTime?
+  isActive        Boolean  @default(false)
+
+  league          League         @relation(fields: [leagueId], references: [id])
+  seasonTeams     SeasonTeam[]
+  quoteSnapshots  QuoteSnapshot[]
+  transactions    Transaction[]
+
+  @@unique([leagueId, label])
+}
+
+model SeasonTeam {
+  id                    String   @id @default(cuid())
+  seasonId              String
+  teamId                String
+  creditsAvailable      Int      @default(0)
+  placement             Int?     // final position in championship
+  placementCredits      Int?     // credits earned from placement
+  entryFee              Float?   // quota ingresso campionato
+  cupFee                Float?   // quota ingresso coppa
+  contractFeeSummer     Float?   // quota contratti estiva
+  contractFeeWinter     Float?   // quota contratti invernale
+
+  season        Season        @relation(fields: [seasonId], references: [id])
+  team          Team          @relation(fields: [teamId], references: [id])
+  rosterEntries RosterEntry[]
+  transactions  Transaction[]
+
+  @@unique([seasonId, teamId])
+}
+
+// ==========================================
+// PLAYER DATA
+// ==========================================
+
+model Player {
+  id            Int       @id // ID from Leghe FC listone
+  name          String
+  birthDate     DateTime?
+  currentTeam   String?   // Serie A team
+  roleClassic   String?   // P, D, C, A
+  roleMantra    String?   // Por, Dc, Dd, Ds, E, M, C, T, W, A, Pc (semicolon-separated)
+
+  // Current quotations (updated from listone)
+  quoteClassic      Int?  // Qt.A
+  quoteInitClassic  Int?  // Qt.I
+  quoteMantra       Int?  // Qt.A M
+  quoteInitMantra   Int?  // Qt.I M
+  fvm               Int?  // FVM Classic
+  fvmMantra         Int?  // FVM Mantra
+
+  isActive      Boolean   @default(true) // false if "Ceduto"
+  updatedAt     DateTime  @updatedAt
+
+  rosterEntries   RosterEntry[]
+  quoteSnapshots  QuoteSnapshot[]
+}
+
+model QuoteSnapshot {
+  id            String   @id @default(cuid())
+  playerId      Int
+  seasonId      String
+  snapshotDate  DateTime @default(now())
+
+  quoteClassic      Int?
+  quoteInitClassic  Int?
+  quoteMantra       Int?
+  quoteInitMantra   Int?
+  fvm               Int?
+  fvmMantra         Int?
+  fvmProportional   Float?  // calculated
+
+  player  Player  @relation(fields: [playerId], references: [id])
+  season  Season  @relation(fields: [seasonId], references: [id])
+
+  @@index([playerId, seasonId])
+}
+
+// ==========================================
+// ROSTER & INSURANCE
+// ==========================================
+
+model RosterEntry {
+  id              String   @id @default(cuid())
+  seasonTeamId    String
+  playerId        Int
+  purchasePrice   Int      // spesa in asta (crediti)
+  purchaseDate    DateTime
+  purchaseType    TransactionType @default(AUCTION)
+
+  // Quotation at time of purchase
+  quoteAtPurchase     Int?
+  fvmPropAtPurchase   Float?
+
+  // Loan info
+  isOnLoan        Boolean  @default(false)
+  loanFromTeamId  String?
+  loanConditions  String?  // JSON text for complex conditions
+
+  // Highest quotation reached
+  highestQuote    Int?
+
+  isActive        Boolean  @default(true) // false when released/traded
+
+  seasonTeam  SeasonTeam   @relation(fields: [seasonTeamId], references: [id])
+  player      Player       @relation(fields: [playerId], references: [id])
+  insurance   Insurance?
+  valuations  Valuation[]
+
+  @@index([seasonTeamId])
+  @@index([playerId])
+}
+
+model Insurance {
+  id              String   @id @default(cuid())
+  rosterEntryId   String   @unique
+  activationDate  DateTime
+  expiryDate      DateTime // activation + 3 years
+  cost            Float    // credits spent
+  isActive        Boolean  @default(true)
+
+  // Quotation/FVM at time of insurance activation/renewal
+  quoteAtActivation     Int?
+  fvmPropAtActivation   Float?
+  quoteAtRenewal        Int?
+  fvmPropAtRenewal      Float?
+
+  rosterEntry RosterEntry @relation(fields: [rosterEntryId], references: [id])
+}
+
+model Valuation {
+  id              String   @id @default(cuid())
+  rosterEntryId   String
+  calculatedAt    DateTime @default(now())
+
+  // Algorithm-based model (3 annualities)
+  algoYear1       Float?
+  algoYear2       Float?
+  algoYear3       Float?
+
+  // FVM Proportional model (3 annualities)
+  fvmYear1        Float?
+  fvmYear2        Float?
+  fvmYear3        Float?
+
+  // Final (average 50/50)
+  finalYear1      Float?
+  finalYear2      Float?
+  finalYear3      Float?
+
+  rosterEntry RosterEntry @relation(fields: [rosterEntryId], references: [id])
+
+  @@index([rosterEntryId])
+}
+
+// ==========================================
+// TRANSACTIONS
+// ==========================================
+
+model Transaction {
+  id              String          @id @default(cuid())
+  seasonId        String
+  seasonTeamId    String
+  type            TransactionType
+  date            DateTime        @default(now())
+  playerId        Int?
+  playerName      String?
+  creditsAmount   Int?            // positive = gain, negative = spend
+  releasePenalty  Int?            // penalty for release by role
+  details         String?         // JSON for complex details
+  notes           String?
+
+  season     Season     @relation(fields: [seasonId], references: [id])
+  seasonTeam SeasonTeam @relation(fields: [seasonTeamId], references: [id])
+
+  @@index([seasonId])
+  @@index([seasonTeamId])
+}
+
+// ==========================================
+// CONFIGURATION TABLES
+// ==========================================
+
+model GrowthTable {
+  id              String @id @default(cuid())
+  roleCategory    String // "A", "C", "D_P"
+  bandLabel       String // "0÷15", "16÷32", etc.
+  bandIndex       Int    // order
+  quoteRangeLabel String // "1÷4", "5÷9", etc.
+  quoteRangeIndex Int    // order
+  value           Float  // the credit value from the table
+}
+
+model AgeCoefficient {
+  id               String @id @default(cuid())
+  age              Int    @unique
+  growthCoeff      Float  // coefficient when player has grown
+  declineCoeff     Float  // coefficient when player has declined
+  invarianceCoeff  Float  // coefficient when player is unchanged
+}
+
+model ReleasePenalty {
+  id          String @id @default(cuid())
+  role        String @unique // P, D, C, A
+  costCredits Int
+}
