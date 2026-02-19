@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { parseRose, TEAM_ABBR_MAP } from '@/lib/parsers';
 
-export const maxDuration = 60;
-
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -45,7 +43,7 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Pre-load all players for fast lookup by name
+    // Pre-load ALL data we need in bulk (minimize DB round trips)
     const allPlayers = await prisma.player.findMany({
       select: { id: true, name: true },
     });
@@ -54,67 +52,82 @@ export async function POST(request: NextRequest) {
       playerByName.set(p.name.toLowerCase(), p.id);
     }
 
-    // Track the next available ID for auto-created players
-    const maxId = allPlayers.reduce((max, p) => Math.max(max, p.id), 0);
-    let nextAutoId = maxId + 1000; // Start well above existing IDs
+    const allTeams = await prisma.team.findMany({
+      where: { leagueId },
+    });
+    const teamByName = new Map(allTeams.map(t => [t.name, t.id]));
+
+    const allSeasonTeams = await prisma.seasonTeam.findMany({
+      where: { seasonId: activeSeason.id },
+      include: { rosterEntries: { select: { id: true, playerId: true } } },
+    });
+    const seasonTeamByTeamId = new Map(allSeasonTeams.map(st => [st.teamId, st]));
+
+    let nextAutoId = allPlayers.reduce((max, p) => Math.max(max, p.id), 0) + 1000;
 
     const results: { team: string; players: number; matched: number; autoCreated: string[]; credits: number }[] = [];
 
     for (const roster of teamRosters) {
       // Get or create team
-      let team = await prisma.team.findFirst({
-        where: { leagueId, name: roster.teamName },
-      });
-
-      if (!team) {
-        team = await prisma.team.create({
+      let teamId = teamByName.get(roster.teamName);
+      if (!teamId) {
+        const newTeam = await prisma.team.create({
           data: { name: roster.teamName, leagueId },
         });
+        teamId = newTeam.id;
+        teamByName.set(roster.teamName, teamId);
       }
 
-      // Get or create season-team link
-      let seasonTeam = await prisma.seasonTeam.findFirst({
-        where: { seasonId: activeSeason.id, teamId: team.id },
-      });
-
-      if (!seasonTeam) {
-        seasonTeam = await prisma.seasonTeam.create({
+      // Get or create season-team
+      let seasonTeamData = seasonTeamByTeamId.get(teamId);
+      if (!seasonTeamData) {
+        const newST = await prisma.seasonTeam.create({
           data: {
             seasonId: activeSeason.id,
-            teamId: team.id,
+            teamId: teamId,
             creditsAvailable: roster.creditsRemaining,
           },
         });
+        seasonTeamData = { ...newST, rosterEntries: [] };
+        seasonTeamByTeamId.set(teamId, seasonTeamData);
       } else {
         await prisma.seasonTeam.update({
-          where: { id: seasonTeam.id },
+          where: { id: seasonTeamData.id },
           data: { creditsAvailable: roster.creditsRemaining },
         });
       }
 
-      // Deactivate all current roster entries
+      const seasonTeamId = seasonTeamData.id;
+      const existingEntries = new Map(
+        seasonTeamData.rosterEntries.map(e => [e.playerId, e.id])
+      );
+
+      // Deactivate all current entries in one query
       await prisma.rosterEntry.updateMany({
-        where: { seasonTeamId: seasonTeam.id },
+        where: { seasonTeamId },
         data: { isActive: false },
       });
 
+      // Prepare batch operations
       let matched = 0;
       const autoCreated: string[] = [];
+      const entriesToCreate: { seasonTeamId: string; playerId: number; purchasePrice: number; purchaseDate: Date; purchaseType: 'AUCTION'; isActive: boolean }[] = [];
+      const entriesToReactivate: { id: string; cost: number }[] = [];
 
       for (const p of roster.players) {
         let playerId = playerByName.get(p.name.toLowerCase());
 
         if (!playerId) {
-          // Auto-create player as "ceduto" (not in official listone)
+          // Auto-create missing player
           const fullTeam = TEAM_ABBR_MAP[p.teamAbbr] || p.teamAbbr;
           const newPlayer = await prisma.player.create({
             data: {
               id: nextAutoId++,
               name: p.name,
               currentTeam: fullTeam,
-              roleClassic: p.role.length === 1 ? p.role : null, // P, D, C, A
-              roleMantra: p.role.length > 1 ? p.role : null,    // Por, Dc, etc.
-              isActive: false, // Mark as not in official listone
+              roleClassic: p.role.length === 1 ? p.role : null,
+              roleMantra: p.role.length > 1 ? p.role : null,
+              isActive: false,
             },
           });
           playerId = newPlayer.id;
@@ -124,34 +137,38 @@ export async function POST(request: NextRequest) {
           matched++;
         }
 
-        // Check if roster entry already exists
-        const existingEntry = await prisma.rosterEntry.findFirst({
-          where: {
-            seasonTeamId: seasonTeam.id,
-            playerId: playerId,
-          },
-        });
-
-        if (existingEntry) {
-          await prisma.rosterEntry.update({
-            where: { id: existingEntry.id },
-            data: {
-              isActive: true,
-              purchasePrice: p.cost,
-            },
-          });
+        const existingEntryId = existingEntries.get(playerId);
+        if (existingEntryId) {
+          entriesToReactivate.push({ id: existingEntryId, cost: p.cost });
         } else {
-          await prisma.rosterEntry.create({
-            data: {
-              seasonTeamId: seasonTeam.id,
-              playerId: playerId,
-              purchasePrice: p.cost,
-              purchaseDate: new Date(),
-              purchaseType: 'AUCTION',
-              isActive: true,
-            },
+          entriesToCreate.push({
+            seasonTeamId,
+            playerId,
+            purchasePrice: p.cost,
+            purchaseDate: new Date(),
+            purchaseType: 'AUCTION',
+            isActive: true,
           });
         }
+      }
+
+      // Batch create new roster entries
+      if (entriesToCreate.length > 0) {
+        await prisma.rosterEntry.createMany({
+          data: entriesToCreate,
+        });
+      }
+
+      // Batch reactivate existing entries (in one transaction)
+      if (entriesToReactivate.length > 0) {
+        await prisma.$transaction(
+          entriesToReactivate.map(e =>
+            prisma.rosterEntry.update({
+              where: { id: e.id },
+              data: { isActive: true, purchasePrice: e.cost },
+            })
+          )
+        );
       }
 
       results.push({
