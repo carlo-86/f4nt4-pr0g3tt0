@@ -4,32 +4,12 @@ import { parseSquadre } from '@/lib/parsers';
 
 export const maxDuration = 60;
 
-// Helper: escape a string for SQL (prevent injection)
-function esc(val: string): string {
-  return val.replace(/'/g, "''");
-}
-
-// Helper: format date for SQL
-function sqlDate(d: Date): string {
-  return `'${d.toISOString()}'::timestamp`;
-}
-
-// Helper: format nullable number
-function sqlNum(v: number | null): string {
-  return v === null ? 'NULL' : String(v);
-}
-
-// Helper: format nullable float
-function sqlFloat(v: number | null | undefined): string {
-  if (v === null || v === undefined) return 'NULL';
-  return String(v);
-}
-
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const leagueId = formData.get('leagueId') as string;
+    const teamIndex = formData.get('teamIndex');
 
     if (!file || !leagueId) {
       return NextResponse.json(
@@ -44,11 +24,33 @@ export async function POST(request: NextRequest) {
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
-    const parsedTeams = parseSquadre(buffer);
+    const allParsedTeams = parseSquadre(buffer);
 
-    if (parsedTeams.length === 0) {
+    if (allParsedTeams.length === 0) {
       return NextResponse.json({ error: 'No teams found in file' }, { status: 400 });
     }
+
+    // If no teamIndex, return team list for the frontend to iterate
+    if (teamIndex === null || teamIndex === undefined) {
+      return NextResponse.json({
+        success: true,
+        mode: 'list',
+        league: league.name,
+        teams: allParsedTeams.map((t, i) => ({
+          index: i,
+          name: t.teamName,
+          players: t.players.length,
+        })),
+      });
+    }
+
+    // Process a single team
+    const idx = parseInt(String(teamIndex), 10);
+    if (isNaN(idx) || idx < 0 || idx >= allParsedTeams.length) {
+      return NextResponse.json({ error: 'Invalid teamIndex' }, { status: 400 });
+    }
+
+    const parsedTeam = allParsedTeams[idx];
 
     const activeSeason = await prisma.season.findFirst({
       where: { leagueId, isActive: true },
@@ -61,7 +63,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Pre-load all data (3 queries)
+    // Load only what we need
     const allPlayers = await prisma.player.findMany({
       select: { id: true, name: true },
     });
@@ -70,11 +72,26 @@ export async function POST(request: NextRequest) {
       playerByName.set(p.name.toLowerCase(), p.id);
     }
 
-    const allTeams = await prisma.team.findMany({ where: { leagueId } });
-    const teamByName = new Map(allTeams.map(t => [t.name, t.id]));
+    const team = await prisma.team.findFirst({
+      where: { leagueId, name: parsedTeam.teamName },
+    });
 
-    const allSeasonTeams = await prisma.seasonTeam.findMany({
-      where: { seasonId: activeSeason.id },
+    if (!team) {
+      return NextResponse.json({
+        success: true,
+        mode: 'team',
+        team: parsedTeam.teamName,
+        index: idx,
+        updated: 0,
+        historicalCreated: 0,
+        insuranceCreated: 0,
+        insuranceUpdated: 0,
+        notFound: [`Team "${parsedTeam.teamName}" not found in league`],
+      });
+    }
+
+    const seasonTeam = await prisma.seasonTeam.findFirst({
+      where: { seasonId: activeSeason.id, teamId: team.id },
       include: {
         rosterEntries: {
           select: {
@@ -86,268 +103,224 @@ export async function POST(request: NextRequest) {
         },
       },
     });
-    const seasonTeamByTeamId = new Map(allSeasonTeams.map(st => [st.teamId, st]));
 
-    // ---- Collect operations ----
+    if (!seasonTeam) {
+      return NextResponse.json({
+        success: true,
+        mode: 'team',
+        team: parsedTeam.teamName,
+        index: idx,
+        updated: 0,
+        historicalCreated: 0,
+        insuranceCreated: 0,
+        insuranceUpdated: 0,
+        notFound: [`SeasonTeam not found`],
+      });
+    }
 
-    const rosterUpdates: {
-      id: string; price: number; date: Date;
-      quote: number | null; fvm: number | null;
+    const rosterByPlayerId = new Map(
+      seasonTeam.rosterEntries.map(re => [re.playerId, re])
+    );
+
+    let updated = 0;
+    let historicalCreated = 0;
+    let insuranceCreated = 0;
+    let insuranceUpdated = 0;
+    const notFound: string[] = [];
+
+    // Collect batch data
+    const rosterUpdates: { id: string; price: number; date: Date; quote: number | null; fvm: number | null }[] = [];
+    const rosterCreateData: {
+      seasonTeamId: string; playerId: number; purchasePrice: number;
+      purchaseDate: Date; purchaseType: 'AUCTION'; quoteAtPurchase: number | null;
+      fvmPropAtPurchase: number | null; isActive: boolean;
     }[] = [];
-
-    const rosterCreates: {
-      seasonTeamId: string; playerId: number; price: number; date: Date;
-      quote: number | null; fvm: number | null;
+    const insCreateData: {
+      playerId: number; insured: boolean;
+      date: Date; expiry: Date; cost: number;
+      qAct: number | null; fAct: number | null;
+      qRen: number | null; fRen: number | null;
     }[] = [];
-
-    const insUpdates: {
+    const insUpdateIds: {
       id: string; date: Date; expiry: Date; cost: number; active: boolean;
       qAct: number | null; fAct: number | null;
       qRen: number | null; fRen: number | null;
     }[] = [];
-
-    const insCreatesForExisting: {
+    const insCreateForExisting: {
       rosterEntryId: string; date: Date; expiry: Date; cost: number; active: boolean;
       qAct: number | null; fAct: number | null;
       qRen: number | null; fRen: number | null;
     }[] = [];
 
-    const insCreatesForNew: {
-      playerId: number; seasonTeamId: string;
-      date: Date; expiry: Date; cost: number;
-      qAct: number | null; fAct: number | null;
-      qRen: number | null; fRen: number | null;
-    }[] = [];
-
-    const results: {
-      team: string; playersInFile: number; updated: number;
-      historicalCreated: number; insuranceCreated: number;
-      insuranceUpdated: number; notFound: string[];
-    }[] = [];
-
-    for (const parsedTeam of parsedTeams) {
-      const stats = {
-        playersInFile: parsedTeam.players.length,
-        updated: 0, historicalCreated: 0,
-        insuranceCreated: 0, insuranceUpdated: 0,
-        notFound: [] as string[],
-      };
-
-      const teamId = teamByName.get(parsedTeam.teamName);
-      const seasonTeamData = teamId ? seasonTeamByTeamId.get(teamId) : null;
-
-      if (!teamId || !seasonTeamData) {
-        stats.notFound.push(`Team/SeasonTeam not found`);
-        results.push({ team: parsedTeam.teamName, ...stats });
+    for (const sp of parsedTeam.players) {
+      const playerId = playerByName.get(sp.name.toLowerCase());
+      if (!playerId) {
+        notFound.push(sp.name);
         continue;
       }
 
-      const rosterByPlayerId = new Map(
-        seasonTeamData.rosterEntries.map(re => [re.playerId, re])
-      );
+      const pDate = sp.purchaseDate ? new Date(sp.purchaseDate) : new Date();
+      const iDate = sp.insuranceDate ? new Date(sp.insuranceDate) : pDate;
+      const eDate = new Date(iDate);
+      eDate.setFullYear(eDate.getFullYear() + 3);
+      const iCost = Math.round(sp.purchasePrice * 0.5);
 
-      for (const sp of parsedTeam.players) {
-        const playerId = playerByName.get(sp.name.toLowerCase());
-        if (!playerId) { stats.notFound.push(sp.name); continue; }
+      const existing = rosterByPlayerId.get(playerId);
 
-        const pDate = sp.purchaseDate ? new Date(sp.purchaseDate) : new Date();
-        const iDate = sp.insuranceDate ? new Date(sp.insuranceDate) : pDate;
-        const eDate = new Date(iDate);
-        eDate.setFullYear(eDate.getFullYear() + 3);
-        const iCost = Math.round(sp.purchasePrice * 0.5);
+      if (existing) {
+        rosterUpdates.push({
+          id: existing.id, price: sp.purchasePrice, date: pDate,
+          quote: sp.quoteAtPurchase, fvm: sp.fvmPropAtPurchase,
+        });
+        updated++;
 
-        const existing = rosterByPlayerId.get(playerId);
-
-        if (existing) {
-          rosterUpdates.push({
-            id: existing.id, price: sp.purchasePrice, date: pDate,
-            quote: sp.quoteAtPurchase, fvm: sp.fvmPropAtPurchase,
-          });
-          stats.updated++;
-
-          if (sp.insured) {
-            if (existing.insurance?.id) {
-              insUpdates.push({
-                id: existing.insurance.id, date: iDate, expiry: eDate,
-                cost: iCost, active: existing.isActive,
-                qAct: sp.quoteAtPurchase, fAct: sp.fvmPropAtPurchase,
-                qRen: sp.quoteRenewal, fRen: sp.fvmPropRenewal,
-              });
-              stats.insuranceUpdated++;
-            } else {
-              insCreatesForExisting.push({
-                rosterEntryId: existing.id, date: iDate, expiry: eDate,
-                cost: iCost, active: existing.isActive,
-                qAct: sp.quoteAtPurchase, fAct: sp.fvmPropAtPurchase,
-                qRen: sp.quoteRenewal, fRen: sp.fvmPropRenewal,
-              });
-              stats.insuranceCreated++;
-            }
-          }
-        } else {
-          rosterCreates.push({
-            seasonTeamId: seasonTeamData.id, playerId,
-            price: sp.purchasePrice, date: pDate,
-            quote: sp.quoteAtPurchase, fvm: sp.fvmPropAtPurchase,
-          });
-          stats.historicalCreated++;
-
-          if (sp.insured) {
-            insCreatesForNew.push({
-              playerId, seasonTeamId: seasonTeamData.id,
-              date: iDate, expiry: eDate, cost: iCost,
+        if (sp.insured) {
+          if (existing.insurance?.id) {
+            insUpdateIds.push({
+              id: existing.insurance.id, date: iDate, expiry: eDate,
+              cost: iCost, active: existing.isActive,
               qAct: sp.quoteAtPurchase, fAct: sp.fvmPropAtPurchase,
               qRen: sp.quoteRenewal, fRen: sp.fvmPropRenewal,
             });
-            stats.insuranceCreated++;
+            insuranceUpdated++;
+          } else {
+            insCreateForExisting.push({
+              rosterEntryId: existing.id, date: iDate, expiry: eDate,
+              cost: iCost, active: existing.isActive,
+              qAct: sp.quoteAtPurchase, fAct: sp.fvmPropAtPurchase,
+              qRen: sp.quoteRenewal, fRen: sp.fvmPropRenewal,
+            });
+            insuranceCreated++;
           }
         }
-      }
-
-      if (parsedTeam.credits !== null) {
-        await prisma.seasonTeam.update({
-          where: { id: seasonTeamData.id },
-          data: { creditsAvailable: parsedTeam.credits },
+      } else {
+        rosterCreateData.push({
+          seasonTeamId: seasonTeam.id, playerId,
+          purchasePrice: sp.purchasePrice, purchaseDate: pDate,
+          purchaseType: 'AUCTION', quoteAtPurchase: sp.quoteAtPurchase,
+          fvmPropAtPurchase: sp.fvmPropAtPurchase, isActive: false,
         });
+        historicalCreated++;
+
+        if (sp.insured) {
+          insCreateData.push({
+            playerId, insured: true, date: iDate, expiry: eDate, cost: iCost,
+            qAct: sp.quoteAtPurchase, fAct: sp.fvmPropAtPurchase,
+            qRen: sp.quoteRenewal, fRen: sp.fvmPropRenewal,
+          });
+          insuranceCreated++;
+        }
       }
-
-      results.push({ team: parsedTeam.teamName, ...stats });
     }
 
-    // ---- EXECUTE: Single SQL statements for bulk operations ----
+    // Execute batch operations
 
-    // 1. Bulk UPDATE roster entries (1 SQL statement)
+    // 1. Update existing roster entries
     if (rosterUpdates.length > 0) {
-      const values = rosterUpdates.map(u =>
-        `('${esc(u.id)}', ${u.price}, ${sqlDate(u.date)}, ${sqlNum(u.quote)}, ${sqlFloat(u.fvm)})`
-      ).join(',\n');
-
-      await prisma.$executeRawUnsafe(`
-        UPDATE "RosterEntry" AS r
-        SET "purchasePrice" = v.price::int,
-            "purchaseDate" = v.pdate::timestamp,
-            "quoteAtPurchase" = v.quote::int,
-            "fvmPropAtPurchase" = v.fvm::double precision
-        FROM (VALUES ${values})
-          AS v(id, price, pdate, quote, fvm)
-        WHERE r."id" = v.id
-      `);
+      await prisma.$transaction(
+        rosterUpdates.map(u =>
+          prisma.rosterEntry.update({
+            where: { id: u.id },
+            data: {
+              purchasePrice: u.price,
+              purchaseDate: u.date,
+              quoteAtPurchase: u.quote,
+              fvmPropAtPurchase: u.fvm,
+            },
+          })
+        )
+      );
     }
 
-    // 2. Bulk CREATE historical roster entries (1 query)
-    if (rosterCreates.length > 0) {
+    // 2. Create historical roster entries
+    if (rosterCreateData.length > 0) {
       await prisma.rosterEntry.createMany({
-        data: rosterCreates.map(c => ({
-          seasonTeamId: c.seasonTeamId,
-          playerId: c.playerId,
-          purchasePrice: c.price,
-          purchaseDate: c.date,
-          purchaseType: 'AUCTION' as const,
-          quoteAtPurchase: c.quote,
-          fvmPropAtPurchase: c.fvm,
-          isActive: false,
-        })),
+        data: rosterCreateData,
         skipDuplicates: true,
       });
     }
 
-    // 3. Bulk UPDATE existing insurance (1 SQL statement)
-    if (insUpdates.length > 0) {
-      const values = insUpdates.map(i =>
-        `('${esc(i.id)}', ${sqlDate(i.date)}, ${sqlDate(i.expiry)}, ${i.cost}, ${i.active}, ${sqlNum(i.qAct)}, ${sqlFloat(i.fAct)}, ${sqlNum(i.qRen)}, ${sqlFloat(i.fRen)})`
-      ).join(',\n');
-
-      await prisma.$executeRawUnsafe(`
-        UPDATE "Insurance" AS ins
-        SET "activationDate" = v.adate::timestamp,
-            "expiryDate" = v.edate::timestamp,
-            "cost" = v.cost::double precision,
-            "isActive" = v.active::boolean,
-            "quoteAtActivation" = v.qact::int,
-            "fvmPropAtActivation" = v.fact::double precision,
-            "quoteAtRenewal" = v.qren::int,
-            "fvmPropAtRenewal" = v.fren::double precision
-        FROM (VALUES ${values})
-          AS v(id, adate, edate, cost, active, qact, fact, qren, fren)
-        WHERE ins."id" = v.id
-      `);
+    // 3. Update existing insurance
+    if (insUpdateIds.length > 0) {
+      await prisma.$transaction(
+        insUpdateIds.map(i =>
+          prisma.insurance.update({
+            where: { id: i.id },
+            data: {
+              activationDate: i.date, expiryDate: i.expiry,
+              cost: i.cost, isActive: i.active,
+              quoteAtActivation: i.qAct, fvmPropAtActivation: i.fAct,
+              quoteAtRenewal: i.qRen, fvmPropAtRenewal: i.fRen,
+            },
+          })
+        )
+      );
     }
 
-    // 4. Bulk CREATE insurance for existing roster entries (1 query)
-    if (insCreatesForExisting.length > 0) {
+    // 4. Create insurance for existing roster entries
+    if (insCreateForExisting.length > 0) {
       await prisma.insurance.createMany({
-        data: insCreatesForExisting.map(i => ({
+        data: insCreateForExisting.map(i => ({
           rosterEntryId: i.rosterEntryId,
-          activationDate: i.date,
-          expiryDate: i.expiry,
-          cost: i.cost,
-          isActive: i.active,
-          quoteAtActivation: i.qAct,
-          fvmPropAtActivation: i.fAct,
-          quoteAtRenewal: i.qRen,
-          fvmPropAtRenewal: i.fRen,
+          activationDate: i.date, expiryDate: i.expiry,
+          cost: i.cost, isActive: i.active,
+          quoteAtActivation: i.qAct, fvmPropAtActivation: i.fAct,
+          quoteAtRenewal: i.qRen, fvmPropAtRenewal: i.fRen,
         })),
       });
     }
 
-    // 5. Insurance for newly created historical entries (2 queries: fetch + createMany)
-    if (insCreatesForNew.length > 0) {
-      const playerIds = insCreatesForNew.map(i => i.playerId);
-      const stIds = [...new Set(insCreatesForNew.map(i => i.seasonTeamId))];
-
+    // 5. Create insurance for newly created historical entries
+    if (insCreateData.length > 0) {
+      const playerIds = insCreateData.map(i => i.playerId);
       const newEntries = await prisma.rosterEntry.findMany({
         where: {
-          seasonTeamId: { in: stIds },
+          seasonTeamId: seasonTeam.id,
           playerId: { in: playerIds },
           isActive: false,
         },
-        select: { id: true, playerId: true, seasonTeamId: true },
+        select: { id: true, playerId: true },
       });
 
-      const entryMap = new Map<string, string>();
-      for (const e of newEntries) {
-        entryMap.set(`${e.seasonTeamId}-${e.playerId}`, e.id);
-      }
+      const entryMap = new Map(newEntries.map(e => [e.playerId, e.id]));
 
-      const insData = insCreatesForNew
+      const insRecords = insCreateData
         .map(i => {
-          const entryId = entryMap.get(`${i.seasonTeamId}-${i.playerId}`);
+          const entryId = entryMap.get(i.playerId);
           if (!entryId) return null;
           return {
             rosterEntryId: entryId,
-            activationDate: i.date,
-            expiryDate: i.expiry,
-            cost: i.cost,
-            isActive: false,
-            quoteAtActivation: i.qAct,
-            fvmPropAtActivation: i.fAct,
-            quoteAtRenewal: i.qRen,
-            fvmPropAtRenewal: i.fRen,
+            activationDate: i.date, expiryDate: i.expiry,
+            cost: i.cost, isActive: false,
+            quoteAtActivation: i.qAct, fvmPropAtActivation: i.fAct,
+            quoteAtRenewal: i.qRen, fvmPropAtRenewal: i.fRen,
           };
         })
         .filter((d): d is NonNullable<typeof d> => d !== null);
 
-      if (insData.length > 0) {
-        await prisma.insurance.createMany({ data: insData });
+      if (insRecords.length > 0) {
+        await prisma.insurance.createMany({ data: insRecords });
       }
     }
 
-    const totalUpdated = results.reduce((s, r) => s + r.updated, 0);
-    const totalHistorical = results.reduce((s, r) => s + r.historicalCreated, 0);
-    const totalInsurance = results.reduce(
-      (s, r) => s + r.insuranceCreated + r.insuranceUpdated, 0
-    );
+    // Update credits
+    if (parsedTeam.credits !== null) {
+      await prisma.seasonTeam.update({
+        where: { id: seasonTeam.id },
+        data: { creditsAvailable: parsedTeam.credits },
+      });
+    }
 
     return NextResponse.json({
       success: true,
-      league: league.name,
-      summary: {
-        teams: results.length,
-        rosterEntriesUpdated: totalUpdated,
-        historicalEntriesCreated: totalHistorical,
-        insuranceRecords: totalInsurance,
-      },
-      teams: results,
+      mode: 'team',
+      team: parsedTeam.teamName,
+      index: idx,
+      updated,
+      historicalCreated,
+      insuranceCreated,
+      insuranceUpdated,
+      notFound,
     });
   } catch (error) {
     console.error('Import squadre error:', error);
