@@ -59,7 +59,12 @@ export async function POST(request: NextRequest) {
       where: { seasonId: activeSeason.id },
       include: {
         rosterEntries: {
-          include: { insurance: { select: { id: true } } },
+          select: {
+            id: true,
+            playerId: true,
+            isActive: true,
+            insurance: { select: { id: true } },
+          },
         },
       },
     });
@@ -119,37 +124,26 @@ export async function POST(request: NextRequest) {
         // Match player by name (case-insensitive)
         const playerId = playerByName.get(sp.name.toLowerCase());
         if (!playerId) {
-          // Player not in listone at all
           notFound.push(sp.name);
           continue;
         }
 
         const purchaseDate = sp.purchaseDate ? new Date(sp.purchaseDate) : new Date();
+        const existing = rosterByPlayerId.get(playerId);
 
-        // Find existing roster entry (active or inactive)
-        let rosterEntry = rosterByPlayerId.get(playerId);
+        // These will be set by either branch
+        let rosterEntryId: string;
+        let insuranceId: string | null;
+        let entryIsActive: boolean;
 
-        if (!rosterEntry) {
-          // No roster entry exists — player was in DB Excel but not in current
-          // Leghe FC rose. Create an INACTIVE historical entry.
-          rosterEntry = await prisma.rosterEntry.create({
-            data: {
-              seasonTeamId: seasonTeamData.id,
-              playerId: playerId,
-              purchasePrice: sp.purchasePrice,
-              purchaseDate: purchaseDate,
-              purchaseType: 'AUCTION',
-              quoteAtPurchase: sp.quoteAtPurchase,
-              fvmPropAtPurchase: sp.fvmPropAtPurchase,
-              isActive: false, // historical/released
-            },
-            include: { insurance: { select: { id: true } } },
-          });
-          historicalCreated++;
-        } else {
+        if (existing) {
           // Roster entry exists — enrich with historical data
+          rosterEntryId = existing.id;
+          insuranceId = existing.insurance?.id ?? null;
+          entryIsActive = existing.isActive;
+
           await prisma.rosterEntry.update({
-            where: { id: rosterEntry.id },
+            where: { id: rosterEntryId },
             data: {
               purchasePrice: sp.purchasePrice,
               purchaseDate: purchaseDate,
@@ -158,6 +152,25 @@ export async function POST(request: NextRequest) {
             },
           });
           updated++;
+        } else {
+          // No roster entry — player was in DB Excel but not in current
+          // Leghe FC rose. Create an INACTIVE historical entry.
+          const created = await prisma.rosterEntry.create({
+            data: {
+              seasonTeamId: seasonTeamData.id,
+              playerId: playerId,
+              purchasePrice: sp.purchasePrice,
+              purchaseDate: purchaseDate,
+              purchaseType: 'AUCTION',
+              quoteAtPurchase: sp.quoteAtPurchase,
+              fvmPropAtPurchase: sp.fvmPropAtPurchase,
+              isActive: false,
+            },
+          });
+          rosterEntryId = created.id;
+          insuranceId = null;
+          entryIsActive = false;
+          historicalCreated++;
         }
 
         // Handle insurance records
@@ -166,23 +179,19 @@ export async function POST(request: NextRequest) {
             ? new Date(sp.insuranceDate)
             : purchaseDate;
 
-          // Expiry = activation date + 3 years
           const expiryDate = new Date(insuranceDate);
           expiryDate.setFullYear(expiryDate.getFullYear() + 3);
 
-          // Cost = 50% of purchase price (standard rule)
           const insuranceCost = Math.round(sp.purchasePrice * 0.5);
 
-          const existingInsurance = rosterEntry.insurance;
-
-          if (existingInsurance) {
+          if (insuranceId) {
             await prisma.insurance.update({
-              where: { id: existingInsurance.id },
+              where: { id: insuranceId },
               data: {
                 activationDate: insuranceDate,
                 expiryDate: expiryDate,
                 cost: insuranceCost,
-                isActive: rosterEntry.isActive, // match roster status
+                isActive: entryIsActive,
                 quoteAtActivation: sp.quoteAtPurchase,
                 fvmPropAtActivation: sp.fvmPropAtPurchase,
                 quoteAtRenewal: sp.quoteRenewal,
@@ -193,11 +202,11 @@ export async function POST(request: NextRequest) {
           } else {
             await prisma.insurance.create({
               data: {
-                rosterEntryId: rosterEntry.id,
+                rosterEntryId: rosterEntryId,
                 activationDate: insuranceDate,
                 expiryDate: expiryDate,
                 cost: insuranceCost,
-                isActive: rosterEntry.isActive, // match roster status
+                isActive: entryIsActive,
                 quoteAtActivation: sp.quoteAtPurchase,
                 fvmPropAtActivation: sp.fvmPropAtPurchase,
                 quoteAtRenewal: sp.quoteRenewal,
