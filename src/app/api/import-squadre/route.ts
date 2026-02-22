@@ -59,7 +59,6 @@ export async function POST(request: NextRequest) {
       where: { seasonId: activeSeason.id },
       include: {
         rosterEntries: {
-          where: { isActive: true },
           include: { insurance: { select: { id: true } } },
         },
       },
@@ -70,9 +69,10 @@ export async function POST(request: NextRequest) {
       team: string;
       playersInFile: number;
       updated: number;
+      historicalCreated: number;
       insuranceCreated: number;
       insuranceUpdated: number;
-      notMatched: string[];
+      notFound: string[];
     }[] = [];
 
     for (const parsedTeam of parsedTeams) {
@@ -82,9 +82,10 @@ export async function POST(request: NextRequest) {
           team: parsedTeam.teamName,
           playersInFile: parsedTeam.players.length,
           updated: 0,
+          historicalCreated: 0,
           insuranceCreated: 0,
           insuranceUpdated: 0,
-          notMatched: [`Team "${parsedTeam.teamName}" not found in league`],
+          notFound: [`Team "${parsedTeam.teamName}" not found in league`],
         });
         continue;
       }
@@ -95,51 +96,69 @@ export async function POST(request: NextRequest) {
           team: parsedTeam.teamName,
           playersInFile: parsedTeam.players.length,
           updated: 0,
+          historicalCreated: 0,
           insuranceCreated: 0,
           insuranceUpdated: 0,
-          notMatched: [`SeasonTeam not found for "${parsedTeam.teamName}"`],
+          notFound: [`SeasonTeam not found for "${parsedTeam.teamName}"`],
         });
         continue;
       }
 
-      // Map playerId -> rosterEntry for this team
+      // Map playerId -> rosterEntry (both active and inactive)
       const rosterByPlayerId = new Map(
         seasonTeamData.rosterEntries.map(re => [re.playerId, re])
       );
 
       let updated = 0;
+      let historicalCreated = 0;
       let insuranceCreated = 0;
       let insuranceUpdated = 0;
-      const notMatched: string[] = [];
+      const notFound: string[] = [];
 
       for (const sp of parsedTeam.players) {
         // Match player by name (case-insensitive)
         const playerId = playerByName.get(sp.name.toLowerCase());
         if (!playerId) {
-          notMatched.push(sp.name);
+          // Player not in listone at all
+          notFound.push(sp.name);
           continue;
         }
 
-        // Find existing roster entry
-        const rosterEntry = rosterByPlayerId.get(playerId);
-        if (!rosterEntry) {
-          notMatched.push(`${sp.name} (no roster entry)`);
-          continue;
-        }
-
-        // Enrich roster entry with historical data from SQUADRE
         const purchaseDate = sp.purchaseDate ? new Date(sp.purchaseDate) : new Date();
 
-        await prisma.rosterEntry.update({
-          where: { id: rosterEntry.id },
-          data: {
-            purchasePrice: sp.purchasePrice,
-            purchaseDate: purchaseDate,
-            quoteAtPurchase: sp.quoteAtPurchase,
-            fvmPropAtPurchase: sp.fvmPropAtPurchase,
-          },
-        });
-        updated++;
+        // Find existing roster entry (active or inactive)
+        let rosterEntry = rosterByPlayerId.get(playerId);
+
+        if (!rosterEntry) {
+          // No roster entry exists — player was in DB Excel but not in current
+          // Leghe FC rose. Create an INACTIVE historical entry.
+          rosterEntry = await prisma.rosterEntry.create({
+            data: {
+              seasonTeamId: seasonTeamData.id,
+              playerId: playerId,
+              purchasePrice: sp.purchasePrice,
+              purchaseDate: purchaseDate,
+              purchaseType: 'AUCTION',
+              quoteAtPurchase: sp.quoteAtPurchase,
+              fvmPropAtPurchase: sp.fvmPropAtPurchase,
+              isActive: false, // historical/released
+            },
+            include: { insurance: { select: { id: true } } },
+          });
+          historicalCreated++;
+        } else {
+          // Roster entry exists — enrich with historical data
+          await prisma.rosterEntry.update({
+            where: { id: rosterEntry.id },
+            data: {
+              purchasePrice: sp.purchasePrice,
+              purchaseDate: purchaseDate,
+              quoteAtPurchase: sp.quoteAtPurchase,
+              fvmPropAtPurchase: sp.fvmPropAtPurchase,
+            },
+          });
+          updated++;
+        }
 
         // Handle insurance records
         if (sp.insured) {
@@ -163,7 +182,7 @@ export async function POST(request: NextRequest) {
                 activationDate: insuranceDate,
                 expiryDate: expiryDate,
                 cost: insuranceCost,
-                isActive: true,
+                isActive: rosterEntry.isActive, // match roster status
                 quoteAtActivation: sp.quoteAtPurchase,
                 fvmPropAtActivation: sp.fvmPropAtPurchase,
                 quoteAtRenewal: sp.quoteRenewal,
@@ -178,7 +197,7 @@ export async function POST(request: NextRequest) {
                 activationDate: insuranceDate,
                 expiryDate: expiryDate,
                 cost: insuranceCost,
-                isActive: true,
+                isActive: rosterEntry.isActive, // match roster status
                 quoteAtActivation: sp.quoteAtPurchase,
                 fvmPropAtActivation: sp.fvmPropAtPurchase,
                 quoteAtRenewal: sp.quoteRenewal,
@@ -190,7 +209,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Update team credits if present in the file
+      // Update credits if available
       if (parsedTeam.credits !== null) {
         await prisma.seasonTeam.update({
           where: { id: seasonTeamData.id },
@@ -202,13 +221,15 @@ export async function POST(request: NextRequest) {
         team: parsedTeam.teamName,
         playersInFile: parsedTeam.players.length,
         updated,
+        historicalCreated,
         insuranceCreated,
         insuranceUpdated,
-        notMatched,
+        notFound,
       });
     }
 
     const totalUpdated = results.reduce((s, r) => s + r.updated, 0);
+    const totalHistorical = results.reduce((s, r) => s + r.historicalCreated, 0);
     const totalInsurance = results.reduce(
       (s, r) => s + r.insuranceCreated + r.insuranceUpdated, 0
     );
@@ -219,6 +240,7 @@ export async function POST(request: NextRequest) {
       summary: {
         teams: results.length,
         rosterEntriesUpdated: totalUpdated,
+        historicalEntriesCreated: totalHistorical,
         insuranceRecords: totalInsurance,
       },
       teams: results,
