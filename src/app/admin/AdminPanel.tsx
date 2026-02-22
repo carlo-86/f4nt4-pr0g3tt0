@@ -61,8 +61,9 @@ export default function AdminPanel({ leagues }: { leagues: LeagueInfo[] }) {
           Step 1 — Importa Listone Quotazioni
         </h2>
         <p className="text-sm text-gray-500 mb-4">
-          Carica il file &quot;Quotazioni Fantacalcio&quot; scaricato da Leghe FC.
-          Aggiorna quotazioni e FVM di tutti i calciatori (per entrambe le leghe).
+          Carica il file &quot;Quotazioni Fantacalcio&quot; scaricato da Leghe
+          FC. Aggiorna quotazioni e FVM di tutti i calciatori (per entrambe le
+          leghe).
         </p>
         <FileUpload
           endpoint="/api/import-quotazioni"
@@ -73,20 +74,26 @@ export default function AdminPanel({ leagues }: { leagues: LeagueInfo[] }) {
 
       {/* Step 2: Import Rose */}
       {leagues.map((league) => (
-        <section key={league.id} className="bg-white rounded-lg border border-gray-200 p-6">
+        <section
+          key={league.id}
+          className="bg-white rounded-lg border border-gray-200 p-6"
+        >
           <h2 className="text-lg font-semibold text-gray-900 mb-1">
             Step 2 — Importa Rose: {league.name}
-            <span className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
-              league.type === 'CLASSIC'
-                ? 'bg-blue-100 text-blue-700'
-                : 'bg-orange-100 text-orange-700'
-            }`}>
+            <span
+              className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                league.type === 'CLASSIC'
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-orange-100 text-orange-700'
+              }`}
+            >
               {league.type}
             </span>
           </h2>
           <p className="text-sm text-gray-500 mb-4">
-            Carica il file &quot;Rose&quot; esportato da Leghe FC per {league.name}.
-            Sincronizza le rose di tutte le {league.teamCount || 10} squadre.
+            Carica il file &quot;Rose&quot; esportato da Leghe FC per{' '}
+            {league.name}. Sincronizza le rose di tutte le{' '}
+            {league.teamCount || 10} squadre.
           </p>
           <FileUpload
             endpoint="/api/import-rose"
@@ -97,9 +104,43 @@ export default function AdminPanel({ leagues }: { leagues: LeagueInfo[] }) {
         </section>
       ))}
 
+      {/* Step 3: Import Squadre (historical data enrichment) */}
+      {leagues.map((league) => (
+        <section
+          key={`squadre-${league.id}`}
+          className="bg-white rounded-lg border border-gray-200 p-6"
+        >
+          <h2 className="text-lg font-semibold text-gray-900 mb-1">
+            Step 3 — Importa Dati Storici: {league.name}
+            <span
+              className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                league.type === 'CLASSIC'
+                  ? 'bg-blue-100 text-blue-700'
+                  : 'bg-orange-100 text-orange-700'
+              }`}
+            >
+              {league.type}
+            </span>
+          </h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Carica il file &quot;DB completo&quot; Excel di {league.name}.
+            Arricchisce le rose già importate con date di acquisto, quotazioni
+            storiche e assicurazioni dal foglio SQUADRE.
+          </p>
+          <FileUpload
+            endpoint="/api/import-squadre"
+            label={`DB completo ${league.name} (.xlsx)`}
+            accept=".xlsx"
+            extraFields={{ leagueId: league.id }}
+          />
+        </section>
+      ))}
+
       {/* Status */}
       <section className="bg-gray-50 rounded-lg border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-3">Stato attuale</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-3">
+          Stato attuale
+        </h2>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <p className="text-gray-500">Leghe configurate</p>
@@ -108,7 +149,9 @@ export default function AdminPanel({ leagues }: { leagues: LeagueInfo[] }) {
           {leagues.map((l) => (
             <div key={l.id}>
               <p className="text-gray-500">{l.name}</p>
-              <p className="text-2xl font-bold text-gray-900">{l.teamCount} squadre</p>
+              <p className="text-2xl font-bold text-gray-900">
+                {l.teamCount} squadre
+              </p>
             </div>
           ))}
         </div>
