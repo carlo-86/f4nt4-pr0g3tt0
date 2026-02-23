@@ -1,6 +1,6 @@
 ' ============================================================
 ' MACRO VBA DEFINITIVA - FANTA TOSTI 2026
-' Aggiornamento completo DB: Listone + Asta Riparazione + Allineamento Date + Assicurazioni + Fix Formule DB + Contratti Invernali
+' Aggiornamento completo DB: Listone + Svincoli + Asta Riparazione + Riordinamento SQUADRE + Allineamento Date + Assicurazioni + Fix Formule DB + Contratti Invernali
 ' Mercato Invernale 2026
 ' ============================================================
 ' ISTRUZIONI:
@@ -47,42 +47,55 @@ Sub ESEGUI_TUTTO_FT()
     Log "Protezione fogli rimossa dove necessario"
     Log ""
 
-    ' FASE 0: Aggiorna LISTA dal listone
+    ' FASE 0: Aggiorna LISTA dal listone (+ delistati a 601+ e date nascita)
     Log "FASE 0: Aggiornamento LISTA dal listone"
     Log "-------------------------------------------"
     Dim wsLista As Worksheet
     Set wsLista = ThisWorkbook.Sheets("LISTA")
     AggiornaListone wsLista, False  ' False = Classic (FT)
 
-    ' FASE 1: Aggiungi giocatori asta riparazione (post 06/02)
     Dim wsSq As Worksheet
     Set wsSq = ThisWorkbook.Sheets("SQUADRE")
+
+    ' FASE 1: Svincoli (rosa attiva -> elenco storico)
     Log ""
-    Log "FASE 1: Inserimento giocatori asta riparazione"
+    Log "FASE 1: Svincoli (spostamento nell'elenco storico)"
+    Log "-------------------------------------------"
+    EseguiSvincoliFT wsSq
+
+    ' FASE 2: Asta riparazione (inserimento nuovi giocatori)
+    Log ""
+    Log "FASE 2: Inserimento giocatori asta riparazione"
     Log "-------------------------------------------"
     InserisciAstaRiparazione wsSq
 
-    ' FASE 2: Allineamento retroattivo date assicurazione (regola triennio rigido)
+    ' FASE 3: Riordinamento SQUADRE per reparto/spesa
     Log ""
-    Log "FASE 2: Allineamento date assicurazione al ciclo triennale"
+    Log "FASE 3: Riordinamento SQUADRE per reparto e spesa"
+    Log "-------------------------------------------"
+    RiordinaSquadreFT wsSq
+
+    ' FASE 4: Allineamento retroattivo date assicurazione (regola triennio rigido)
+    Log ""
+    Log "FASE 4: Allineamento date assicurazione al ciclo triennale"
     Log "-------------------------------------------"
     AllineaDatePreventive wsSq
 
-    ' FASE 3: Registra assicurazioni
+    ' FASE 5: Registra assicurazioni
     Log ""
-    Log "FASE 3: Registrazione assicurazioni"
+    Log "FASE 5: Registrazione assicurazioni"
     Log "-------------------------------------------"
     RegistraAssicurazioni wsSq
 
-    ' FASE 4: Correggi formule foglio DB (audit 22/02/2026)
+    ' FASE 6: Correggi formule foglio DB (audit 22/02/2026)
     Log ""
-    Log "FASE 4: Correzione formule foglio DB"
+    Log "FASE 6: Correzione formule foglio DB"
     Log "-------------------------------------------"
     CorreggiFormuleDB
 
-    ' FASE 5: Calcola e annota quote contratti mercato di riparazione
+    ' FASE 7: Calcola e annota quote contratti mercato di riparazione
     Log ""
-    Log "FASE 5: Calcolo quote contratti invernali (QUOTE+MONTEPREMI 2026)"
+    Log "FASE 7: Calcolo quote contratti invernali (QUOTE+MONTEPREMI 2026)"
     Log "-------------------------------------------"
     CalcolaContrattiInvernali wsLista
 
@@ -150,15 +163,20 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
         Exit Sub
     End If
 
-    ' 3. Leggi dati dal listone (fogli "Tutti" e "Ceduti")
+    ' 3. Dizionario per tracciare tutti gli ID nel listone
+    Dim dictListoneIDs As Object
+    Set dictListoneIDs = CreateObject("Scripting.Dictionary")
+    Dim dictNewPlayers As Object
+    Set dictNewPlayers = CreateObject("Scripting.Dictionary")
+
     Dim aggiornati As Long, aggiunti As Long, skippati As Long
     aggiornati = 0: aggiunti = 0: skippati = 0
 
-    ' Trova l'ultima riga con dati nella LISTA
+    ' Trova l'ultima riga con dati nella tabella principale (solo righe 2-600)
     Dim lastListaRow As Long
     lastListaRow = 1
     Dim scanR As Long
-    For scanR = 2 To 2000
+    For scanR = 2 To 600
         If Trim(CStr(wsLista.Cells(scanR, 1).Value)) <> "" Then
             lastListaRow = scanR
         End If
@@ -171,7 +189,8 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
     On Error GoTo 0
     If Not wsTutti Is Nothing Then
         Log "  Elaborazione foglio 'Tutti'..."
-        ProcessaFoglioListone wsTutti, wsLista, isMantra, lastListaRow, aggiornati, aggiunti, skippati
+        ProcessaFoglioListone wsTutti, wsLista, isMantra, lastListaRow, _
+            aggiornati, aggiunti, skippati, dictListoneIDs, dictNewPlayers
     Else
         Log "  ATTENZIONE: Foglio 'Tutti' non trovato nel listone!"
     End If
@@ -183,7 +202,8 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
     On Error GoTo 0
     If Not wsCeduti Is Nothing Then
         Log "  Elaborazione foglio 'Ceduti'..."
-        ProcessaFoglioListone wsCeduti, wsLista, isMantra, lastListaRow, aggiornati, aggiunti, skippati
+        ProcessaFoglioListone wsCeduti, wsLista, isMantra, lastListaRow, _
+            aggiornati, aggiunti, skippati, dictListoneIDs, dictNewPlayers
     Else
         Log "  ATTENZIONE: Foglio 'Ceduti' non trovato nel listone."
     End If
@@ -191,12 +211,149 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
     ' 4. Chiudi il listone senza salvare
     wbListone.Close SaveChanges:=False
 
-    ' 5. Imposta formula Eta' per le nuove righe
+    Log "  LISTA aggiornata: " & aggiornati & " aggiornati, " & aggiunti & " aggiunti, " & skippati & " skippati"
+
+    ' ========================================
+    ' 5. GESTIONE DELISTATI: sposta dalla tabella principale (2-600) alla sezione storica (601+)
+    ' ========================================
+    Log "  Gestione delistati..."
+    Dim delistCount As Long: delistCount = 0
+
+    ' Trova l'ultima riga occupata nella sezione storica (601+)
+    Dim lastHistRow As Long: lastHistRow = 600
+    For scanR = 601 To 2000
+        If Trim(CStr(wsLista.Cells(scanR, 1).Value)) <> "" Then
+            lastHistRow = scanR
+        End If
+    Next scanR
+
+    ' Cerca nella tabella principale gli ID non presenti nel listone
+    For scanR = 2 To lastListaRow
+        Dim listaId As Variant
+        listaId = wsLista.Cells(scanR, 1).Value
+        If Trim(CStr(listaId)) <> "" Then
+            On Error Resume Next
+            Dim idNum As Long
+            idNum = CLng(listaId)
+            On Error GoTo 0
+            If idNum > 0 And Not dictListoneIDs.Exists(idNum) Then
+                ' Delistato! Sposta nella sezione storica
+                lastHistRow = lastHistRow + 1
+                Dim colC As Long
+                For colC = 1 To 9
+                    wsLista.Cells(lastHistRow, colC).Value = wsLista.Cells(scanR, colC).Value
+                Next colC
+                For colC = 1 To 9
+                    wsLista.Cells(scanR, colC).ClearContents
+                Next colC
+                delistCount = delistCount + 1
+            End If
+            idNum = 0
+        End If
+    Next scanR
+    Log "  Delistati spostati a 601+: " & delistCount
+
+    ' ========================================
+    ' 6. COMPATTAMENTO tabella principale (rimuovi righe vuote)
+    ' ========================================
+    Log "  Compattamento tabella principale..."
+    Dim mainCount As Long: mainCount = 0
+    For scanR = 2 To 600
+        If Trim(CStr(wsLista.Cells(scanR, 2).Value)) <> "" Then
+            mainCount = mainCount + 1
+        End If
+    Next scanR
+
+    If mainCount > 0 Then
+        ReDim mainData(1 To mainCount, 1 To 9) As Variant
+        Dim mIdx As Long: mIdx = 0
+        For scanR = 2 To 600
+            If Trim(CStr(wsLista.Cells(scanR, 2).Value)) <> "" Then
+                mIdx = mIdx + 1
+                For colC = 1 To 9
+                    mainData(mIdx, colC) = wsLista.Cells(scanR, colC).Value
+                Next colC
+            End If
+        Next scanR
+
+        For scanR = 2 To 600
+            mIdx = scanR - 1
+            If mIdx <= mainCount Then
+                For colC = 1 To 9
+                    wsLista.Cells(scanR, colC).Value = mainData(mIdx, colC)
+                Next colC
+            Else
+                For colC = 1 To 9
+                    wsLista.Cells(scanR, colC).ClearContents
+                Next colC
+            End If
+        Next scanR
+    End If
+    lastListaRow = mainCount + 1  ' Aggiorna lastListaRow dopo compattamento
+    Log "  Tabella principale compattata: " & mainCount & " calciatori"
+
+    ' ========================================
+    ' 7. DATE DI NASCITA per nuovi calciatori (L:N)
+    ' ========================================
+    If dictNewPlayers.Count > 0 Then
+        Log "  Ricerca date di nascita per " & dictNewPlayers.Count & " nuovi calciatori..."
+        Dim newKeys As Variant
+        newKeys = dictNewPlayers.Keys
+        Dim nk As Long
+        For nk = LBound(newKeys) To UBound(newKeys)
+            Dim newId As Long: newId = newKeys(nk)
+            Dim newInfo As String: newInfo = CStr(dictNewPlayers(newId))
+            ' newInfo = "nome|squadra"
+            Dim pipePos As Long: pipePos = InStr(newInfo, "|")
+            Dim newNome As String: newNome = Left(newInfo, pipePos - 1)
+            Dim newSquadra As String: newSquadra = Mid(newInfo, pipePos + 1)
+
+            ' Verifica se il calciatore ha gia' una voce in L:N
+            Dim alreadyInLN As Boolean: alreadyInLN = False
+            For scanR = 1 To 2000
+                If UCase(Trim(CStr(wsLista.Cells(scanR, 12).Value))) = UCase(newNome) Then
+                    alreadyInLN = True
+                    Exit For
+                End If
+            Next scanR
+
+            If Not alreadyInLN Then
+                ' Trova la prima riga vuota in colonna L
+                Dim lnRow As Long: lnRow = 0
+                For scanR = 2 To 2000
+                    If Trim(CStr(wsLista.Cells(scanR, 12).Value)) = "" Then
+                        lnRow = scanR
+                        Exit For
+                    End If
+                Next scanR
+
+                If lnRow > 0 Then
+                    wsLista.Cells(lnRow, 12).Value = newNome
+                    ' Tenta ricerca data nascita online
+                    Dim birthDate As Variant
+                    birthDate = CercaDataNascitaOnline(newId, newNome, newSquadra)
+                    If Not IsEmpty(birthDate) Then
+                        wsLista.Cells(lnRow, 13).Value = birthDate
+                        wsLista.Cells(lnRow, 13).NumberFormat = "dd/mm/yyyy"
+                        Log "    " & newNome & " (ID " & newId & "): data nascita trovata"
+                    Else
+                        Log "    " & newNome & " (ID " & newId & "): data nascita NON trovata - inserire manualmente"
+                    End If
+                    ' Formula eta' in colonna N
+                    wsLista.Cells(lnRow, 14).Formula = _
+                        "=IF(M" & lnRow & "="""","""",INT(($N$1-M" & lnRow & ")/365.25))"
+                End If
+            End If
+        Next nk
+    End If
+
+    ' ========================================
+    ' 8. Formula Eta' per le righe della tabella principale
+    ' ========================================
     Log "  Aggiornamento formula Eta'..."
     Dim etaR As Long
     For etaR = 2 To lastListaRow
         If Trim(CStr(wsLista.Cells(etaR, 2).Value)) <> "" Then
-            ' Solo se la cella Eta' e' vuota o e' un numero (non formula)
             If IsEmpty(wsLista.Cells(etaR, 9).Value) Or wsLista.Cells(etaR, 9).Value = "" Then
                 wsLista.Cells(etaR, 9).Formula = _
                     "=IFERROR(VLOOKUP(B" & etaR & ",$L:$N,3,FALSE),"""")"
@@ -204,8 +361,10 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
         End If
     Next etaR
 
-    ' 6. Ordina LISTA per Calciatore (col B) A->Z
-    Log "  Ordinamento LISTA per nome calciatore..."
+    ' ========================================
+    ' 9. Ordina tabella principale (A1:I) per Calciatore A->Z
+    ' ========================================
+    Log "  Ordinamento tabella principale..."
     If lastListaRow > 2 Then
         wsLista.Sort.SortFields.Clear
         wsLista.Sort.SortFields.Add2 _
@@ -222,7 +381,27 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
         End With
     End If
 
-    Log "  LISTA aggiornata: " & aggiornati & " aggiornati, " & aggiunti & " aggiunti, " & skippati & " skippati"
+    ' ========================================
+    ' 10. Ordina sezione storica (601+) per Calciatore A->Z
+    ' ========================================
+    If lastHistRow > 601 Then
+        Log "  Ordinamento sezione storica (601-" & lastHistRow & ")..."
+        wsLista.Sort.SortFields.Clear
+        wsLista.Sort.SortFields.Add2 _
+            Key:=wsLista.Range("B601:B" & lastHistRow), _
+            SortOn:=xlSortOnValues, _
+            Order:=xlAscending, _
+            DataOption:=xlSortNormal
+        With wsLista.Sort
+            .SetRange wsLista.Range("A601:I" & lastHistRow)
+            .Header = xlNo
+            .MatchCase = False
+            .Orientation = xlTopToBottom
+            .Apply
+        End With
+    End If
+
+    Log "  FASE 0 completata."
 End Sub
 
 ' ============================================================
@@ -231,7 +410,8 @@ End Sub
 ' ============================================================
 Private Sub ProcessaFoglioListone(wsSource As Worksheet, wsLista As Worksheet, _
     isMantra As Boolean, ByRef lastListaRow As Long, _
-    ByRef aggiornati As Long, ByRef aggiunti As Long, ByRef skippati As Long)
+    ByRef aggiornati As Long, ByRef aggiunti As Long, ByRef skippati As Long, _
+    dictIDs As Object, dictNew As Object)
 
     ' Il listone ha:
     ' Riga 1: titolo ("Quotazioni Fantacalcio Stagione...")
@@ -256,7 +436,6 @@ Private Sub ProcessaFoglioListone(wsSource As Worksheet, wsLista As Worksheet, _
         nomeRaw = Trim(CStr(wsSource.Cells(r, 4).Value))
         Dim nomeClean As String
         nomeClean = Replace(nomeRaw, ".", "")
-        ' Rimuovi spazi finali dopo il punto (es. "Martinez L. " -> "Martinez L")
         nomeClean = Trim(nomeClean)
 
         ' Leggi altri dati dal listone
@@ -283,9 +462,14 @@ Private Sub ProcessaFoglioListone(wsSource As Worksheet, wsLista As Worksheet, _
             GoTo NextRow
         End If
 
-        ' Cerca per ID nella LISTA (col A)
+        ' Traccia ID nel dizionario
+        On Error Resume Next
+        dictIDs.Item(CLng(listoneId)) = True
+        On Error GoTo 0
+
+        ' Cerca per ID nella LISTA (col A, solo tabella principale 1-600)
         Dim matchRow As Variant
-        matchRow = Application.Match(CLng(listoneId), wsLista.Range("A:A"), 0)
+        matchRow = Application.Match(CLng(listoneId), wsLista.Range("A1:A600"), 0)
 
         If Not IsError(matchRow) Then
             ' TROVATO: aggiorna la riga esistente
@@ -300,17 +484,59 @@ Private Sub ProcessaFoglioListone(wsSource As Worksheet, wsLista As Worksheet, _
             wsLista.Cells(mRow, 8).Value = fvmVal         ' FVM
             aggiornati = aggiornati + 1
         Else
-            ' NON TROVATO: aggiungi come nuova riga
-            lastListaRow = lastListaRow + 1
-            wsLista.Cells(lastListaRow, 1).Value = CLng(listoneId)  ' ID
-            wsLista.Cells(lastListaRow, 2).Value = nomeClean         ' Calciatore
-            wsLista.Cells(lastListaRow, 3).Value = ruoloC             ' Ruolo
-            wsLista.Cells(lastListaRow, 4).Value = ruoloM             ' R. Mantra
-            wsLista.Cells(lastListaRow, 5).Value = squadra             ' Squadra
-            wsLista.Cells(lastListaRow, 6).Value = qtAttuale           ' Q. attuale
-            wsLista.Cells(lastListaRow, 7).Value = qtIniziale          ' Q. iniziale
-            wsLista.Cells(lastListaRow, 8).Value = fvmVal              ' FVM
-            aggiunti = aggiunti + 1
+            ' Controlla anche nella sezione storica (601+) - potrebbe essere stato delistato prima
+            Dim histMatch As Variant
+            histMatch = Empty
+            Dim sR As Long
+            For sR = 601 To 2000
+                If Trim(CStr(wsLista.Cells(sR, 1).Value)) = "" Then GoTo SkipHistRow
+                If CLng(wsLista.Cells(sR, 1).Value) = CLng(listoneId) Then
+                    histMatch = sR
+                    Exit For
+                End If
+SkipHistRow:
+            Next sR
+
+            If Not IsEmpty(histMatch) Then
+                ' Era nella sezione storica: ri-sposta nella tabella principale
+                lastListaRow = lastListaRow + 1
+                Dim colC As Long
+                For colC = 1 To 9
+                    wsLista.Cells(lastListaRow, colC).Value = wsLista.Cells(CLng(histMatch), colC).Value
+                Next colC
+                For colC = 1 To 9
+                    wsLista.Cells(CLng(histMatch), colC).ClearContents
+                Next colC
+                ' Aggiorna con i nuovi dati
+                wsLista.Cells(lastListaRow, 2).Value = nomeClean
+                wsLista.Cells(lastListaRow, 3).Value = ruoloC
+                wsLista.Cells(lastListaRow, 4).Value = ruoloM
+                wsLista.Cells(lastListaRow, 5).Value = squadra
+                wsLista.Cells(lastListaRow, 6).Value = qtAttuale
+                wsLista.Cells(lastListaRow, 7).Value = qtIniziale
+                wsLista.Cells(lastListaRow, 8).Value = fvmVal
+                aggiornati = aggiornati + 1
+            Else
+                ' Veramente nuovo: aggiungi nella tabella principale
+                lastListaRow = lastListaRow + 1
+                If lastListaRow > 600 Then
+                    Log "    ATTENZIONE: Tabella principale piena (>600 righe), " & nomeClean & " non aggiunto"
+                    lastListaRow = lastListaRow - 1
+                    skippati = skippati + 1
+                    GoTo NextRow
+                End If
+                wsLista.Cells(lastListaRow, 1).Value = CLng(listoneId)
+                wsLista.Cells(lastListaRow, 2).Value = nomeClean
+                wsLista.Cells(lastListaRow, 3).Value = ruoloC
+                wsLista.Cells(lastListaRow, 4).Value = ruoloM
+                wsLista.Cells(lastListaRow, 5).Value = squadra
+                wsLista.Cells(lastListaRow, 6).Value = qtAttuale
+                wsLista.Cells(lastListaRow, 7).Value = qtIniziale
+                wsLista.Cells(lastListaRow, 8).Value = fvmVal
+                aggiunti = aggiunti + 1
+                ' Traccia come nuovo per ricerca data nascita
+                dictNew.Item(CLng(listoneId)) = nomeClean & "|" & squadra
+            End If
         End If
 
 NextRow:
@@ -319,7 +545,294 @@ NextRow:
 End Sub
 
 ' ============================================================
-' FASE 1: Inserisci giocatori acquisiti nell'asta riparazione
+' Helper: Cerca data di nascita online da fantacalcio.it
+' Ritorna la data come Variant (Date) o Empty se non trovata.
+' URL: https://www.fantacalcio.it/serie-a/squadre/{team}/{player}/{id}
+' ============================================================
+Private Function CercaDataNascitaOnline(playerID As Long, playerName As String, squadraAbbr As String) As Variant
+    CercaDataNascitaOnline = Empty
+    On Error GoTo BirthDateErr
+
+    ' Mappa abbreviazioni squadre -> nomi URL
+    Dim teamUrl As String: teamUrl = ""
+    Dim sq As String: sq = LCase(Trim(squadraAbbr))
+    Select Case sq
+        Case "ata": teamUrl = "atalanta"
+        Case "bol": teamUrl = "bologna"
+        Case "cag": teamUrl = "cagliari"
+        Case "com": teamUrl = "como"
+        Case "cre": teamUrl = "cremonese"
+        Case "emp": teamUrl = "empoli"
+        Case "fio": teamUrl = "fiorentina"
+        Case "gen": teamUrl = "genoa"
+        Case "int": teamUrl = "inter"
+        Case "juv": teamUrl = "juventus"
+        Case "laz": teamUrl = "lazio"
+        Case "lec": teamUrl = "lecce"
+        Case "mil": teamUrl = "milan"
+        Case "mon": teamUrl = "monza"
+        Case "nap": teamUrl = "napoli"
+        Case "par": teamUrl = "parma"
+        Case "pis": teamUrl = "pisa"
+        Case "rom": teamUrl = "roma"
+        Case "sas": teamUrl = "sassuolo"
+        Case "tor": teamUrl = "torino"
+        Case "udi": teamUrl = "udinese"
+        Case "ven": teamUrl = "venezia"
+        Case "ver": teamUrl = "verona"
+        Case "niz": teamUrl = "nizza"
+        Case Else: Exit Function
+    End Select
+
+    ' Formatta nome per URL (lowercase, spazi->trattini, rimuovi accenti)
+    Dim nomeUrl As String
+    nomeUrl = LCase(Trim(playerName))
+    nomeUrl = Replace(nomeUrl, " ", "-")
+    nomeUrl = Replace(nomeUrl, "'", "")
+    nomeUrl = Replace(nomeUrl, ".", "")
+    nomeUrl = Replace(nomeUrl, Chr(232), "e")
+    nomeUrl = Replace(nomeUrl, Chr(233), "e")
+    nomeUrl = Replace(nomeUrl, Chr(236), "i")
+    nomeUrl = Replace(nomeUrl, Chr(242), "o")
+    nomeUrl = Replace(nomeUrl, Chr(224), "a")
+    nomeUrl = Replace(nomeUrl, Chr(249), "u")
+
+    Dim url As String
+    url = "https://www.fantacalcio.it/serie-a/squadre/" & teamUrl & "/" & nomeUrl & "/" & playerID
+
+    Dim http As Object
+    Set http = CreateObject("MSXML2.XMLHTTP")
+    http.Open "GET", url, False
+    http.setRequestHeader "User-Agent", "Mozilla/5.0"
+    http.send
+
+    If http.Status <> 200 Then GoTo BirthDateErr
+
+    Dim html As String
+    html = http.responseText
+
+    ' Cerca pattern data nascita: "dd/mm/yyyy" vicino a "nascita" o "nato"
+    Dim pos As Long
+    pos = InStr(1, html, "nascita", vbTextCompare)
+    If pos = 0 Then pos = InStr(1, html, "nato il", vbTextCompare)
+    If pos = 0 Then GoTo BirthDateErr
+
+    ' Cerca un pattern data (dd/mm/yyyy) nei 200 caratteri successivi
+    Dim chunk As String
+    chunk = Mid(html, pos, 200)
+    Dim datePattern As String
+    Dim ci As Long
+    For ci = 1 To Len(chunk) - 9
+        Dim ch As String
+        ch = Mid(chunk, ci, 10)
+        ' Pattern: dd/mm/yyyy
+        If Mid(ch, 3, 1) = "/" And Mid(ch, 6, 1) = "/" Then
+            If IsNumeric(Left(ch, 2)) And IsNumeric(Mid(ch, 4, 2)) And IsNumeric(Right(ch, 4)) Then
+                datePattern = ch
+                Exit For
+            End If
+        End If
+    Next ci
+
+    If Len(datePattern) > 0 Then
+        CercaDataNascitaOnline = CDate(datePattern)
+    End If
+
+    Set http = Nothing
+    Exit Function
+
+BirthDateErr:
+    CercaDataNascitaOnline = Empty
+    On Error Resume Next
+    Set http = Nothing
+    On Error GoTo 0
+End Function
+
+' ============================================================
+' FASE 1: Svincoli (sposta giocatori dalla rosa attiva
+'         all'elenco storico dei calciatori ceduti)
+' ============================================================
+Private Sub EseguiSvincoliFT(ws As Worksheet)
+    ' --- FCK DEPORTIVO (col 3) - usa asterischi nell'elenco storico ---
+    SvincolaGiocatore ws, 3, "Viti", True
+    SvincolaGiocatore ws, 3, "Guendouzi", True
+
+    ' --- HELLAS MADONNA (col 15) ---
+    SvincolaGiocatore ws, 15, "Sava", False
+    SvincolaGiocatore ws, 15, "Floriani", False       ' Floriani Mussolini
+    SvincolaGiocatore ws, 15, "Dzeko", False
+    SvincolaGiocatore ws, 15, "Sanabria", False
+    SvincolaGiocatore ws, 15, "Sohm", False
+
+    ' --- MUTTLEY SUPERSTAR (col 27) ---
+    SvincolaGiocatore ws, 27, "Bravo", False
+    SvincolaGiocatore ws, 27, "Lang", False
+
+    ' --- PARTIZAN (col 39) ---
+    SvincolaGiocatore ws, 39, "Vasquez D", False
+    SvincolaGiocatore ws, 39, "Lovik", False
+    SvincolaGiocatore ws, 39, "Stanciu", False
+
+    ' --- LEGENDA AUREA (col 51) ---
+    SvincolaGiocatore ws, 51, "Biraghi", False
+    SvincolaGiocatore ws, 51, "Fazzini", False
+    SvincolaGiocatore ws, 51, "Venturino", False
+    SvincolaGiocatore ws, 51, "Collocolo", False
+    SvincolaGiocatore ws, 51, "Gronbaek", False
+    SvincolaGiocatore ws, 51, "Cutrone", False
+    SvincolaGiocatore ws, 51, "Lucca", False
+    SvincolaGiocatore ws, 51, "Belotti", False
+
+    ' --- KUNG FU PANDEV (col 63) ---
+    SvincolaGiocatore ws, 63, "Lazzari", False
+    SvincolaGiocatore ws, 63, "Vazquez", False
+    SvincolaGiocatore ws, 63, "Luvumbo", False
+    SvincolaGiocatore ws, 63, "Tameze", False
+
+    ' --- MILLWALL (col 75) ---
+    SvincolaGiocatore ws, 75, "Israel", False
+    SvincolaGiocatore ws, 75, "Leali", False
+    SvincolaGiocatore ws, 75, "Posch", False
+    SvincolaGiocatore ws, 75, "Bailey", False
+    SvincolaGiocatore ws, 75, "Castellanos", False
+    SvincolaGiocatore ws, 75, "Lookman", False
+
+    ' --- FC CKC 26 (col 87) ---
+    SvincolaGiocatore ws, 87, "Mandas", False
+    SvincolaGiocatore ws, 87, "Ghilardi", False
+    SvincolaGiocatore ws, 87, "Zemura", False
+    SvincolaGiocatore ws, 87, "Carboni V", False
+    SvincolaGiocatore ws, 87, "Gilmour", False
+    SvincolaGiocatore ws, 87, "Anjorin", False
+    SvincolaGiocatore ws, 87, "Immobile", False
+    SvincolaGiocatore ws, 87, "Ngonge", False
+    SvincolaGiocatore ws, 87, "Almqvist", False
+
+    ' --- PAPAIE TOP TEAM (col 99) ---
+    SvincolaGiocatore ws, 99, "Sportiello", False
+
+    ' --- TRONZANO (col 111) ---
+    SvincolaGiocatore ws, 111, "Mari", False          ' Mari'
+    SvincolaGiocatore ws, 111, "Tete", False           ' Tete Morente
+End Sub
+
+' ============================================================
+' Helper: Svincola un giocatore (rosa attiva -> elenco storico)
+' Cerca il giocatore nella rosa attiva (righe 6-52), copia
+' tutti i dati nell'elenco storico sottostante, cancella la
+' riga dalla rosa attiva. useAsterisk=True per FCK (FT) e
+' Papaie (FM) che usano * nei nomi storici.
+' ============================================================
+Private Function SvincolaGiocatore(ws As Worksheet, colCalc As Long, nomeCerca As String, useAsterisk As Boolean) As Boolean
+    Dim nc As String
+    nc = UCase(Replace(Replace(Trim(nomeCerca), "'", ""), ".", ""))
+    nc = Replace(nc, Chr(232), "e")
+    nc = Replace(nc, Chr(233), "e")
+    nc = Replace(nc, Chr(236), "i")
+    nc = Replace(nc, Chr(242), "o")
+    nc = Replace(nc, Chr(224), "a")
+    nc = Replace(nc, Chr(249), "u")
+
+    ' Cerca il giocatore nella rosa attiva (righe 6-52)
+    Dim r As Long
+    For r = 6 To 52
+        Dim nomeCell As String
+        nomeCell = UCase(Trim(CStr(ws.Cells(r, colCalc).Value)))
+        If Len(nomeCell) = 0 Or nomeCell = "CALCIATORE" Then GoTo NextSvRow
+        nomeCell = Replace(nomeCell, "'", "")
+        nomeCell = Replace(nomeCell, ".", "")
+        nomeCell = Replace(nomeCell, Chr(232), "e")
+        nomeCell = Replace(nomeCell, Chr(233), "e")
+        nomeCell = Replace(nomeCell, Chr(236), "i")
+        nomeCell = Replace(nomeCell, Chr(242), "o")
+        nomeCell = Replace(nomeCell, Chr(224), "a")
+        nomeCell = Replace(nomeCell, Chr(249), "u")
+        nomeCell = Replace(nomeCell, Chr(200), "E")
+        nomeCell = Replace(nomeCell, Chr(201), "E")
+
+        If InStr(1, nomeCell, nc, vbTextCompare) > 0 Then
+            ' Trovato! Salva tutti i dati (offsets +0 a +10)
+            Dim savedData(0 To 10) As Variant
+            Dim offset As Long
+            For offset = 0 To 10
+                savedData(offset) = ws.Cells(r, colCalc + offset).Value
+            Next offset
+
+            ' Trova l'elenco storico: cerca "Elenco storico" nella colonna del team
+            Dim histStart As Long
+            histStart = 0
+            Dim sr As Long
+            For sr = 48 To 200
+                If InStr(1, CStr(ws.Cells(sr, colCalc).Value), "Elenco storico", vbTextCompare) > 0 Then
+                    histStart = sr
+                    Exit For
+                End If
+            Next sr
+
+            If histStart = 0 Then
+                Log "  ERRORE SVINCOLO: Elenco storico non trovato per colonna " & colCalc
+                SvincolaGiocatore = False
+                Exit Function
+            End If
+
+            ' L'header e' 3 righe sotto "Elenco storico", i dati partono da 4 righe sotto
+            Dim histDataStart As Long
+            histDataStart = histStart + 4
+
+            ' Trova la prima riga vuota nell'elenco storico
+            Dim histRow As Long
+            histRow = histDataStart
+            Do While Trim(CStr(ws.Cells(histRow, colCalc).Value)) <> ""
+                histRow = histRow + 1
+                If histRow > 570 Then
+                    Log "  ERRORE SVINCOLO: Elenco storico pieno per colonna " & colCalc
+                    SvincolaGiocatore = False
+                    Exit Function
+                End If
+            Loop
+
+            ' Scrivi i dati nell'elenco storico
+            For offset = 0 To 10
+                ws.Cells(histRow, colCalc + offset).Value = savedData(offset)
+            Next offset
+
+            ' Formatta le colonne data
+            If IsDate(ws.Cells(histRow, colCalc + 4).Value) Or IsNumeric(ws.Cells(histRow, colCalc + 4).Value) Then
+                ws.Cells(histRow, colCalc + 4).NumberFormat = "dd/mm/yyyy"
+            End If
+            If IsDate(ws.Cells(histRow, colCalc + 7).Value) Or IsNumeric(ws.Cells(histRow, colCalc + 7).Value) Then
+                ws.Cells(histRow, colCalc + 7).NumberFormat = "dd/mm/yyyy"
+            End If
+
+            ' Gestisci asterischi se necessario (solo FCK per FT, Papaie per FM)
+            If useAsterisk Then
+                ws.Cells(histRow, colCalc).Value = CStr(savedData(0)) & "*"
+                Dim insFlag As String
+                insFlag = Trim(CStr(ws.Cells(histRow, colCalc + 3).Value))
+                If insFlag = "A" Then
+                    ws.Cells(histRow, colCalc + 3).Value = "A*"
+                End If
+            End If
+
+            ' Cancella la riga nella rosa attiva
+            For offset = 0 To 10
+                ws.Cells(r, colCalc + offset).ClearContents
+            Next offset
+
+            Log "  SVINCOLATO: " & CStr(savedData(0)) & " (riga " & r & " -> storico riga " & histRow & ")" & _
+                IIf(useAsterisk, " [con *]", "")
+            SvincolaGiocatore = True
+            Exit Function
+        End If
+NextSvRow:
+    Next r
+
+    Log "  NON TROVATO per svincolo: " & nomeCerca & " nella colonna " & colCalc
+    SvincolaGiocatore = False
+End Function
+
+' ============================================================
+' FASE 2: Inserisci giocatori acquisiti nell'asta riparazione
 ' ============================================================
 Private Sub InserisciAstaRiparazione(ws As Worksheet)
     ' --- HELLAS MADONNA (col 15) ---
@@ -370,7 +883,156 @@ Private Sub InserisciAstaRiparazione(ws As Worksheet)
 End Sub
 
 ' ============================================================
-' FASE 2: Registra tutte le assicurazioni
+' FASE 3: Riordinamento SQUADRE per reparto/spesa
+' Per ogni squadra: ordina ogni sezione di reparto per Spesa
+' DESC, Q.acq DESC come tiebreaker. Poi ordina l'elenco
+' storico con la stessa logica (ma senza divisione per reparto).
+' ============================================================
+Private Sub RiordinaSquadreFT(ws As Worksheet)
+    Dim teamCols As Variant
+    teamCols = Array( _
+        Array("FCK Deportivo", 3), Array("Hellas Madonna", 15), _
+        Array("muttley superstar", 27), Array("PARTIZAN", 39), _
+        Array("Legenda Aurea", 51), Array("Kung Fu Pandev", 63), _
+        Array("Millwall", 75), Array("FC CKC 26", 87), _
+        Array("Papaie Top Team", 99), Array("Tronzano", 111))
+
+    Dim t As Long
+    For t = LBound(teamCols) To UBound(teamCols)
+        Dim tName As String, col As Long
+        tName = teamCols(t)(0): col = teamCols(t)(1)
+
+        ' --- Rosa attiva: trova i confini delle sezioni ---
+        ' Le sezioni sono delimitate dalle righe dove col+0 = "Calciatore"
+        Dim hdrRows(1 To 10) As Long
+        Dim hCount As Long: hCount = 0
+        Dim r As Long
+        For r = 5 To 52
+            If Trim(CStr(ws.Cells(r, col).Value)) = "Calciatore" Then
+                hCount = hCount + 1
+                hdrRows(hCount) = r
+            End If
+        Next r
+
+        ' Ordina ogni sezione tra header consecutivi
+        Dim h As Long
+        For h = 1 To hCount
+            Dim secStart As Long, secEnd As Long
+            secStart = hdrRows(h) + 1
+            If h < hCount Then
+                secEnd = hdrRows(h + 1) - 1
+            Else
+                secEnd = 52
+            End If
+            OrdinaSezione ws, col, secStart, secEnd
+        Next h
+
+        ' --- Elenco storico: ordina per Spesa DESC ---
+        Dim histStart As Long: histStart = 0
+        For r = 48 To 200
+            If InStr(1, CStr(ws.Cells(r, col).Value), "Elenco storico", vbTextCompare) > 0 Then
+                histStart = r
+                Exit For
+            End If
+        Next r
+
+        If histStart > 0 Then
+            Dim histDataStart As Long
+            histDataStart = histStart + 4
+            Dim histDataEnd As Long: histDataEnd = histDataStart - 1
+            For r = histDataStart To 570
+                If Trim(CStr(ws.Cells(r, col).Value)) <> "" Then
+                    histDataEnd = r
+                End If
+            Next r
+            If histDataEnd >= histDataStart Then
+                OrdinaSezione ws, col, histDataStart, histDataEnd
+            End If
+        End If
+
+        Log "    " & tName & ": rosa + storico riordinati"
+    Next t
+End Sub
+
+' ============================================================
+' Helper: Ordina una sezione di giocatori per Spesa DESC,
+'         Q.acquisto DESC come tiebreaker (bubble sort)
+' firstRow..lastRow = range di righe dati (no header)
+' ============================================================
+Private Sub OrdinaSezione(ws As Worksheet, colCalc As Long, firstRow As Long, lastRow As Long)
+    ' Conta giocatori non vuoti
+    Dim pCount As Long: pCount = 0
+    Dim r As Long
+    For r = firstRow To lastRow
+        If Trim(CStr(ws.Cells(r, colCalc).Value)) <> "" Then
+            pCount = pCount + 1
+        End If
+    Next r
+
+    If pCount <= 1 Then Exit Sub
+
+    ' Leggi dati giocatori in array 2D
+    ReDim pData(1 To pCount, 0 To 10) As Variant
+    Dim idx As Long: idx = 0
+    For r = firstRow To lastRow
+        If Trim(CStr(ws.Cells(r, colCalc).Value)) <> "" Then
+            idx = idx + 1
+            Dim c As Long
+            For c = 0 To 10
+                pData(idx, c) = ws.Cells(r, colCalc + c).Value
+            Next c
+        End If
+    Next r
+
+    ' Bubble sort DESC: Spesa (+10), tiebreak Q.acquisto (+5)
+    Dim i As Long, j As Long
+    For i = 1 To pCount - 1
+        For j = 1 To pCount - i
+            Dim spJ As Double, spJ1 As Double
+            spJ = 0: spJ1 = 0
+            If IsNumeric(pData(j, 10)) Then spJ = CDbl(pData(j, 10))
+            If IsNumeric(pData(j + 1, 10)) Then spJ1 = CDbl(pData(j + 1, 10))
+
+            Dim doSwap As Boolean: doSwap = False
+            If spJ1 > spJ Then
+                doSwap = True
+            ElseIf spJ1 = spJ Then
+                Dim qJ As Double, qJ1 As Double
+                qJ = 0: qJ1 = 0
+                If IsNumeric(pData(j, 5)) Then qJ = CDbl(pData(j, 5))
+                If IsNumeric(pData(j + 1, 5)) Then qJ1 = CDbl(pData(j + 1, 5))
+                If qJ1 > qJ Then doSwap = True
+            End If
+
+            If doSwap Then
+                Dim tmp As Variant
+                For c = 0 To 10
+                    tmp = pData(j, c)
+                    pData(j, c) = pData(j + 1, c)
+                    pData(j + 1, c) = tmp
+                Next c
+            End If
+        Next j
+    Next i
+
+    ' Riscrivi dati ordinati, poi svuota righe in eccesso
+    idx = 0
+    For r = firstRow To lastRow
+        idx = idx + 1
+        If idx <= pCount Then
+            For c = 0 To 10
+                ws.Cells(r, colCalc + c).Value = pData(idx, c)
+            Next c
+        Else
+            For c = 0 To 10
+                ws.Cells(r, colCalc + c).ClearContents
+            Next c
+        End If
+    Next r
+End Sub
+
+' ============================================================
+' FASE 5: Registra tutte le assicurazioni
 ' ============================================================
 Private Sub RegistraAssicurazioni(ws As Worksheet)
     ' --- HELLAS MADONNA (col 15) ---

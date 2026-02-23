@@ -23,22 +23,26 @@ Le macro gestiscono **automaticamente** la protezione dei fogli: rimuovono la pr
 
 Le macro DEFINITIVA automatizzano **tutte** le operazioni in un'unica esecuzione, incluso l'aggiornamento del listone:
 
-### FT (`ESEGUI_TUTTO_FT`):
-1. **FASE 0 - Listone**: Importa il listone aggiornato nel foglio LISTA (aggiorna quotazioni, FVM, ruoli, squadre; aggiunge nuovi calciatori; rimuove i punti dai nomi; riordina alfabeticamente)
-2. **FASE 1 - Asta Riparazione**: Inserisce i giocatori acquisiti nell'asta di riparazione (post 06/02) nelle colonne SQUADRE
-3. **FASE 2 - Allineamento Date**: Allinea retroattivamente tutte le date di assicurazione al ciclo triennale (regola triennio rigido: decorrenza = scatto triennale dalla data acquisto)
-4. **FASE 3 - Assicurazioni**: Registra il flag "A" e la data per tutti i giocatori assicurati (con gestione rinnovi preventivi: se il triennio non e' scaduto, la nuova decorrenza parte dalla scadenza del triennio corrente)
-5. **FASE 4 - Fix Formule DB**: Corregge 3 bug nelle formule del foglio DB + rinomina header BP2
-6. **FASE 5 - Contratti Invernali**: Calcola la quota contratti per gli acquisti del mercato di riparazione (Qt.Attuale x 0.05 EUR per giocatore) e la scrive nel foglio QUOTE+MONTEPREMI 2026 colonna I
+### FT (`ESEGUI_TUTTO_FT`) - 8 fasi:
+1. **FASE 0 - Listone**: Importa il listone aggiornato nel foglio LISTA (aggiorna quotazioni, FVM, ruoli, squadre; aggiunge nuovi calciatori; rimuove i punti dai nomi; riordina alfabeticamente). Sposta i giocatori non piu' listati nella sezione storica (riga 601+). Cerca le date di nascita su fantacalcio.it per i nuovi calciatori (colonne L:N).
+2. **FASE 1 - Svincoli**: Sposta i giocatori svincolati dalla rosa attiva all'elenco storico nel foglio SQUADRE (con gestione asterischi per FCK)
+3. **FASE 2 - Asta Riparazione**: Inserisce i giocatori acquisiti nell'asta di riparazione (post 06/02) nelle colonne SQUADRE
+4. **FASE 3 - Riordinamento SQUADRE**: Riordina ogni sezione di reparto (P/D/C/A) per Spesa decrescente (con Q.acquisto come tiebreaker). Riordina anche l'elenco storico per Spesa decrescente.
+5. **FASE 4 - Allineamento Date**: Allinea retroattivamente tutte le date di assicurazione al ciclo triennale (regola triennio rigido: decorrenza = scatto triennale dalla data acquisto)
+6. **FASE 5 - Assicurazioni**: Registra il flag "A" e la data per tutti i giocatori assicurati (con gestione rinnovi preventivi: se il triennio non e' scaduto, la nuova decorrenza parte dalla scadenza del triennio corrente)
+7. **FASE 6 - Fix Formule DB**: Corregge 3 bug nelle formule del foglio DB + rinomina header BP2
+8. **FASE 7 - Contratti Invernali**: Calcola la quota contratti per gli acquisti del mercato di riparazione (Qt.Attuale x 0.05 EUR per giocatore) e la scrive nel foglio QUOTE+MONTEPREMI 2026 colonna I
 
-### FM (`ESEGUI_TUTTO_FM`):
-1. **FASE 0 - Listone**: Importa il listone aggiornato nel foglio LISTA (con quotazioni Mantra: Qt.A M, Qt.I M, FVM M)
-2. **FASE 1 - Scambi**: Sposta i giocatori coinvolti negli scambi post-06/02 (Minnesota-Lino, Minnesota-Papaie, David Minnesota-Hellas, Bernabe/Cancellieri)
-3. **FASE 2 - Asta Riparazione**: Inserisce i nuovi giocatori acquisiti nell'asta di riparazione
-4. **FASE 3 - Allineamento Date**: Allinea retroattivamente tutte le date di assicurazione al ciclo triennale (regola triennio rigido)
-5. **FASE 4 - Assicurazioni**: Registra il flag "A" e la data per tutti i giocatori assicurati (con gestione rinnovi preventivi)
-6. **FASE 5 - Fix Formule DB**: Corregge 3 bug nelle formule del foglio DB + rinomina header BP2
-7. **FASE 6 - Contratti Invernali**: Calcola la quota contratti per gli acquisti del mercato di riparazione e la scrive nel foglio QUOTE+MONTEPREMI 2026 colonna I
+### FM (`ESEGUI_TUTTO_FM`) - 9 fasi:
+1. **FASE 0 - Listone**: Importa il listone aggiornato nel foglio LISTA (con quotazioni Mantra: Qt.A M, Qt.I M, FVM M). Sposta i giocatori non piu' listati nella sezione storica (riga 601+). Cerca le date di nascita su fantacalcio.it per i nuovi calciatori (colonne L:N).
+2. **FASE 1 - Svincoli**: Sposta i giocatori svincolati dalla rosa attiva all'elenco storico nel foglio SQUADRE (con gestione asterischi per Papaie)
+3. **FASE 2 - Scambi**: Sposta i giocatori coinvolti negli scambi post-06/02 (Minnesota-Lino, Minnesota-Papaie, David Minnesota-Hellas, Bernabe/Cancellieri)
+4. **FASE 3 - Asta Riparazione**: Inserisce i nuovi giocatori acquisiti nell'asta di riparazione
+5. **FASE 4 - Riordinamento SQUADRE**: Riordina ogni sezione di reparto (P/D/C/A) per Spesa decrescente (con Q.acquisto come tiebreaker), preservando la colonna Reparto. Riordina anche l'elenco storico per Spesa decrescente.
+6. **FASE 5 - Allineamento Date**: Allinea retroattivamente tutte le date di assicurazione al ciclo triennale (regola triennio rigido)
+7. **FASE 6 - Assicurazioni**: Registra il flag "A" e la data per tutti i giocatori assicurati (con gestione rinnovi preventivi)
+8. **FASE 7 - Fix Formule DB**: Corregge 3 bug nelle formule del foglio DB + rinomina header BP2
+9. **FASE 8 - Contratti Invernali**: Calcola la quota contratti per gli acquisti del mercato di riparazione e la scrive nel foglio QUOTE+MONTEPREMI 2026 colonna I
 
 ### Note importanti:
 - **Listone**: La macro chiede di selezionare il file listone tramite dialog. Scegliere il file piu' recente (es. `Quotazioni_Fantacalcio_Stagione_2025_26_22.02.2026.xlsx`). I punti vengono rimossi automaticamente dai nomi (es. "Martinez L." diventa "Martinez L").
@@ -93,18 +97,20 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 2. Nella finestra di dialogo, seleziona **ESEGUI_TUTTO_FT**
 3. Clicca **Esegui**
 4. **Appare una finestra di selezione file**: scegli il file listone (`Quotazioni_Fantacalcio_Stagione_2025_26_22.02.2026.xlsx`)
-5. La macro esegue automaticamente tutte le 6 fasi (listone + asta riparazione + allineamento date + assicurazioni + fix formule DB + contratti invernali)
+5. La macro esegue automaticamente tutte le 8 fasi (listone + svincoli + asta riparazione + riordinamento SQUADRE + allineamento date + assicurazioni + fix formule DB + contratti invernali)
 6. Al termine appare un messaggio di conferma
 
 ### Passo 5: Controlla il log
 1. Vai al foglio **LOG_MACRO** (creato automaticamente)
 2. Verifica che tutte le operazioni siano andate a buon fine:
-   - **FASE 0 (Listone)**: `X aggiornati, Y aggiunti, Z skippati`
-   - **FASE 1 (Asta rip.)**: `INSERITO` / `GIA' PRESENTE`
-   - **FASE 2 (Allineamento)**: `ALLINEATO: Squadra / Calciatore - da DD/MM/YYYY a DD/MM/YYYY` + contatori finali
-   - **FASE 3 (Assicurazioni)**: `ASSICURATO` / `RINNOVO` / `RINNOVO PREVENTIVO` / `SKIP`
-   - **FASE 4 (Fix Formule)**: `Corretto: BV/BW/BX`, `Corretto: BY/BZ/CA`, `Corretto: BS` + `Rinominato: BP2`
-   - **FASE 5 (Contratti)**: Per ogni squadra: quota EUR con dettaglio per giocatore + `TOTALE`
+   - **FASE 0 (Listone)**: `X aggiornati, Y aggiunti, Z skippati` + delistati spostati a 601+ + date nascita cercate
+   - **FASE 1 (Svincoli)**: `SVINCOLATO: Squadra / Calciatore -> elenco storico riga N`
+   - **FASE 2 (Asta rip.)**: `INSERITO` / `GIA' PRESENTE`
+   - **FASE 3 (Riordinamento)**: `Ordinata sezione X (N giocatori)` per ogni reparto e squadra
+   - **FASE 4 (Allineamento)**: `ALLINEATO: Squadra / Calciatore - da DD/MM/YYYY a DD/MM/YYYY` + contatori finali
+   - **FASE 5 (Assicurazioni)**: `ASSICURATO` / `RINNOVO` / `RINNOVO PREVENTIVO` / `SKIP`
+   - **FASE 6 (Fix Formule)**: `Corretto: BV/BW/BX`, `Corretto: BY/BZ/CA`, `Corretto: BS` + `Rinominato: BP2`
+   - **FASE 7 (Contratti)**: Per ogni squadra: quota EUR con dettaglio per giocatore + `TOTALE`
 
 ### Passo 6: Verifica
 1. Nell'editor VBA, premi **F5** di nuovo
@@ -140,10 +146,12 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 2. Seleziona **ESEGUI_TUTTO_FM**
 3. Clicca **Esegui**
 4. **Seleziona il file listone** quando appare la finestra di selezione file
-5. La macro esegue in sequenza le 7 fasi:
-   - Aggiornamento LISTA dal listone (quotazioni Mantra)
+5. La macro esegue in sequenza le 9 fasi:
+   - Aggiornamento LISTA dal listone (quotazioni Mantra) + delistati a 601+ + date nascita
+   - Svincoli (rosa attiva -> elenco storico)
    - Scambi post-06/02 (spostamento giocatori tra colonne)
    - Inserimento asta riparazione
+   - Riordinamento SQUADRE per reparto e spesa
    - Allineamento retroattivo date assicurazione
    - Registrazione assicurazioni (con rinnovi preventivi)
    - Correzione formule DB
@@ -153,13 +161,15 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 ### Passo 5: Controlla il log
 1. Vai al foglio **LOG_MACRO**
 2. Verifica le operazioni:
-   - **FASE 0**: N. aggiornati/aggiunti nella LISTA
-   - **FASE 1**: `SPOSTATO` / `GIA' IN DESTINAZIONE` / `NON TROVATO nella colonna X (potrebbe essere gia' spostato)`
-   - **FASE 2**: `INSERITO` / `GIA' PRESENTE`
-   - **FASE 3**: `ALLINEATO: Squadra / Calciatore - da ... a ...` + contatori finali
-   - **FASE 4**: `ASSICURATO` / `RINNOVO` / `RINNOVO PREVENTIVO` / `SKIP`
-   - **FASE 5**: `Corretto: BV/BW/BX`, `Corretto: BY/BZ/CA`, `Corretto: BS` + `Rinominato: BP2`
-   - **FASE 6**: Per ogni squadra: quota EUR con dettaglio per giocatore + `TOTALE`
+   - **FASE 0**: N. aggiornati/aggiunti nella LISTA + delistati spostati a 601+ + date nascita cercate
+   - **FASE 1**: `SVINCOLATO: Squadra / Calciatore -> elenco storico riga N`
+   - **FASE 2**: `SPOSTATO` / `GIA' IN DESTINAZIONE` / `NON TROVATO nella colonna X (potrebbe essere gia' spostato)`
+   - **FASE 3**: `INSERITO` / `GIA' PRESENTE`
+   - **FASE 4**: `Ordinata sezione X (N giocatori)` per ogni reparto e squadra
+   - **FASE 5**: `ALLINEATO: Squadra / Calciatore - da ... a ...` + contatori finali
+   - **FASE 6**: `ASSICURATO` / `RINNOVO` / `RINNOVO PREVENTIVO` / `SKIP`
+   - **FASE 7**: `Corretto: BV/BW/BX`, `Corretto: BY/BZ/CA`, `Corretto: BS` + `Rinominato: BP2`
+   - **FASE 8**: Per ogni squadra: quota EUR con dettaglio per giocatore + `TOTALE`
 
 ### Passo 6: Verifica
 1. Premi **F5** > seleziona **VerificaAssicuratiFM**
@@ -178,23 +188,29 @@ Dopo aver completato entrambe le macro:
 1. Vai al foglio **LISTA** di ciascun DB:
    - Verifica che i nomi non abbiano punti (es. "Martinez L" e non "Martinez L.")
    - Controlla che le quotazioni e FVM siano aggiornati
-   - Verifica che la lista sia ordinata alfabeticamente
-2. Vai al foglio **ROSA** di ciascun DB:
+   - Verifica che la lista sia ordinata alfabeticamente (righe 2-~529)
+   - Verifica che i giocatori delistati siano stati spostati nella sezione storica (da riga 601 in giu')
+   - Controlla le colonne L:N per le date di nascita dei nuovi calciatori (se mancanti, controllare LOG_MACRO)
+2. Vai al foglio **SQUADRE** di ciascun DB:
+   - Verifica che i giocatori svincolati siano stati rimossi dalla rosa attiva e inseriti nell'elenco storico
+   - Verifica che ogni sezione di reparto (P/D/C/A) sia ordinata per Spesa decrescente
+   - Verifica che l'elenco storico sia ordinato per Spesa decrescente
+3. Vai al foglio **ROSA** di ciascun DB:
    - Seleziona ogni squadra dal menu a tendina
    - Verifica che:
      - I giocatori assicurati mostrino "A" nella colonna appropriata
      - La colonna E (Costo) mostri il valore calcolato
-3. Confronta i valori con il file `REPORT-ASSICURAZIONI-2026.md`
-4. Verifica le formule nel foglio **DB**:
+4. Confronta i valori con il file `REPORT-ASSICURAZIONI-2026.md`
+5. Verifica le formule nel foglio **DB**:
    - **BV3**: deve contenere `MAX($J3,$AO3)` (non solo `$AO3`)
    - **BY4**: deve contenere `$BF` (non `$BB`)
    - **BS** (qualsiasi riga): il ramo Portiere deve avere `(MAX(...)-...)*0.65` (non `...-(...)*0.75`)
    - **BP2**: deve mostrare "Valore tabellare per ruolo"
-5. Verifica le **date di assicurazione** nel foglio SQUADRE:
+6. Verifica le **date di assicurazione** nel foglio SQUADRE:
    - Per ogni giocatore assicurato, la data (+7) deve corrispondere a uno scatto triennale dalla Data acquisto (+4)
    - Per i rinnovi preventivi, la data sara' futura rispetto al 14/02/2026 (es. se Dacq=12/09/2020, la data potrebbe essere 12/09/2026 o 12/09/2029)
    - Controlla il LOG_MACRO per la lista degli allineamenti effettuati
-6. Verifica il foglio **QUOTE+MONTEPREMI 2026**:
+7. Verifica il foglio **QUOTE+MONTEPREMI 2026**:
    - La colonna I ("Quota contratti mercato di riparazione") deve mostrare i costi per le squadre con acquisti invernali
    - Le squadre senza acquisti (FCK, Tronzano per FT; Mastri per FM) devono avere 0.00
    - La riga TOTALI deve mostrare la somma corretta
