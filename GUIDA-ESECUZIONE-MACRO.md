@@ -14,6 +14,9 @@
 ## IMPORTANTE: Backup prima di procedere
 **Crea una copia di backup di entrambi i DB Excel PRIMA di eseguire le macro!**
 
+## Protezione fogli di lavoro
+Le macro gestiscono **automaticamente** la protezione dei fogli: rimuovono la protezione all'inizio dell'esecuzione e la ripristinano al termine. Solo i fogli che erano effettivamente protetti vengono ri-protetti. Non è necessario rimuovere manualmente la protezione prima di eseguire le macro.
+
 ---
 
 ## Cosa fanno le macro DEFINITIVA

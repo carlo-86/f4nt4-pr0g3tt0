@@ -28,6 +28,7 @@
 ' +10 = Spesa
 
 Private Const DATA_ASS As String = "14/02/2026"
+Private Const SHEET_PWD As String = "89y3R8HF'(()h7t87gH)(/0?9U38Qyp99"
 Private logText As String
 
 ' ============================================================
@@ -38,6 +39,24 @@ Sub ESEGUI_TUTTO_FM()
 
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
+
+    ' Salva stato protezione e rimuovi protezione dai fogli
+    Dim protLista As Boolean, protSquadre As Boolean, protDB As Boolean, protQM As Boolean
+    protLista = ThisWorkbook.Sheets("LISTA").ProtectContents
+    protSquadre = ThisWorkbook.Sheets("SQUADRE").ProtectContents
+    protDB = ThisWorkbook.Sheets("DB").ProtectContents
+    On Error Resume Next
+    protQM = ThisWorkbook.Sheets("QUOTE+MONTEPREMI 2026").ProtectContents
+    On Error GoTo 0
+
+    On Error Resume Next
+    If protLista Then ThisWorkbook.Sheets("LISTA").Unprotect SHEET_PWD
+    If protSquadre Then ThisWorkbook.Sheets("SQUADRE").Unprotect SHEET_PWD
+    If protDB Then ThisWorkbook.Sheets("DB").Unprotect SHEET_PWD
+    If protQM Then ThisWorkbook.Sheets("QUOTE+MONTEPREMI 2026").Unprotect SHEET_PWD
+    On Error GoTo 0
+    Log "Protezione fogli rimossa dove necessario"
+    Log ""
 
     ' FASE 0: Aggiorna LISTA dal listone
     Log "FASE 0: Aggiornamento LISTA dal listone"
@@ -83,6 +102,16 @@ Sub ESEGUI_TUTTO_FM()
     Log "FASE 6: Calcolo quote contratti invernali (QUOTE+MONTEPREMI 2026)"
     Log "-------------------------------------------"
     CalcolaContrattiInvernali wsLista
+
+    ' Ripristina protezione fogli (solo quelli che erano protetti)
+    On Error Resume Next
+    If protLista Then ThisWorkbook.Sheets("LISTA").Protect SHEET_PWD
+    If protSquadre Then ThisWorkbook.Sheets("SQUADRE").Protect SHEET_PWD
+    If protDB Then ThisWorkbook.Sheets("DB").Protect SHEET_PWD
+    If protQM Then ThisWorkbook.Sheets("QUOTE+MONTEPREMI 2026").Protect SHEET_PWD
+    On Error GoTo 0
+    Log ""
+    Log "Protezione fogli ripristinata."
 
     ' Ricalcola
     Application.Calculation = xlCalculationAutomatic
@@ -610,7 +639,19 @@ Sub CorreggiFormuleDB_FM()
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
 
+    ' Rimuovi protezione foglio DB se presente
+    Dim protDB As Boolean
+    protDB = ThisWorkbook.Sheets("DB").ProtectContents
+    On Error Resume Next
+    If protDB Then ThisWorkbook.Sheets("DB").Unprotect SHEET_PWD
+    On Error GoTo 0
+
     CorreggiFormuleDB
+
+    ' Ripristina protezione se era presente
+    On Error Resume Next
+    If protDB Then ThisWorkbook.Sheets("DB").Protect SHEET_PWD
+    On Error GoTo 0
 
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
