@@ -158,16 +158,16 @@ Sub ESEGUI_TUTTO_FM()
     Log ""
     Log "=== COMPLETATO ==="
 
-    ' Crea foglio log
+    ' Crea foglio log (elimina e ricrea per evitare residui/protezione)
     Dim wsLog As Worksheet
+    Application.DisplayAlerts = False
     On Error Resume Next
-    Set wsLog = ThisWorkbook.Sheets("LOG_MACRO")
-    If wsLog Is Nothing Then
-        Set wsLog = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-        wsLog.Name = "LOG_MACRO"
-    End If
+    ThisWorkbook.Sheets("LOG_MACRO").Delete
     On Error GoTo 0
-    wsLog.Cells.Clear
+    Application.DisplayAlerts = True
+    Set wsLog = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+    wsLog.Name = "LOG_MACRO"
+    wsLog.Columns(1).NumberFormat = "@"  ' Formato testo
     Dim logLines() As String, logR As Long
     logLines = Split(logText, vbCrLf)
     For logR = 0 To UBound(logLines)
@@ -1343,16 +1343,16 @@ Sub CorreggiFormuleDB_FM()
     Application.Calculation = xlCalculationAutomatic
     Application.ScreenUpdating = True
 
-    ' Output log
+    ' Output log (elimina e ricrea per evitare residui/protezione)
     Dim wsLog As Worksheet
+    Application.DisplayAlerts = False
     On Error Resume Next
-    Set wsLog = ThisWorkbook.Sheets("LOG_MACRO")
-    If wsLog Is Nothing Then
-        Set wsLog = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-        wsLog.Name = "LOG_MACRO"
-    End If
+    ThisWorkbook.Sheets("LOG_MACRO").Delete
     On Error GoTo 0
-    wsLog.Cells.Clear
+    Application.DisplayAlerts = True
+    Set wsLog = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+    wsLog.Name = "LOG_MACRO"
+    wsLog.Columns(1).NumberFormat = "@"  ' Formato testo
     Dim logLines() As String, logR As Long
     logLines = Split(logText, vbCrLf)
     For logR = 0 To UBound(logLines)
