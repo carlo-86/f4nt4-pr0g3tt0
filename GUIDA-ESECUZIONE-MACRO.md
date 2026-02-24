@@ -80,8 +80,9 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 
 ### Passo 1: Apri il file DB
 1. Apri `Fanta Tosti 2026 - DB completo (06.02.2026).xlsx`
-2. Quando richiesta la password, inserisci: `89y3R8HF'(()h7t87gH)(/0?9U38Qyp99`
-3. Se appare un avviso sulle macro, clicca "Abilita contenuto"
+2. Se appare un avviso sulle macro, clicca "Abilita contenuto"
+
+> **Nota**: il file si apre senza password. La password di protezione fogli (`89y3R8HF'(()h7t87gH)(/0?9U38Qyp99`) e' usata internamente dalla macro per sbloccare/ribloccare i fogli — non serve inserirla manualmente.
 
 ### Passo 2: Apri l'editor VBA
 1. Premi **Alt+F11** (si apre l'editor Visual Basic)
@@ -93,12 +94,13 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 3. Torna nell'editor VBA e **incolla** (Ctrl+V) nel modulo vuoto
 
 ### Passo 4: Esegui la macro principale
-1. Premi **F5** (o menu Esegui > Esegui Sub/UserForm)
-2. Nella finestra di dialogo, seleziona **ESEGUI_TUTTO_FT**
-3. Clicca **Esegui**
-4. **Appare una finestra di selezione file**: scegli il file listone (`Quotazioni_Fantacalcio_Stagione_2025_26_22.02.2026.xlsx`)
-5. La macro esegue automaticamente tutte le 8 fasi (listone + svincoli + asta riparazione + riordinamento SQUADRE + allineamento date + assicurazioni + fix formule DB + contratti invernali)
-6. Al termine appare un messaggio di conferma
+1. **Torna in Excel** (chiudi o minimizza l'editor VBA con Alt+Q o cliccando la X)
+2. Vai su **Visualizza > Macro > Visualizza macro** (oppure premi **Alt+F8**)
+3. Nella lista delle macro, seleziona **ESEGUI_TUTTO_FT**
+4. Clicca **Esegui**
+5. **Appare una finestra di selezione file**: scegli il file listone (`Quotazioni_Fantacalcio_Stagione_2025_26_22.02.2026.xlsx`)
+6. La macro esegue automaticamente tutte le 8 fasi (listone + svincoli + asta riparazione + riordinamento SQUADRE + allineamento date + assicurazioni + fix formule DB + contratti invernali)
+7. Al termine appare un messaggio di conferma
 
 ### Passo 5: Controlla il log
 1. Vai al foglio **LOG_MACRO** (creato automaticamente)
@@ -113,10 +115,11 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
    - **FASE 7 (Contratti)**: Per ogni squadra: quota EUR con dettaglio per giocatore + `TOTALE`
 
 ### Passo 6: Verifica
-1. Nell'editor VBA, premi **F5** di nuovo
+1. Premi **Alt+F8** (finestra Visualizza macro)
 2. Seleziona **VerificaAssicuratiFT**
-3. Appare un riepilogo di tutti i giocatori assicurati per squadra
-4. Verifica che corrisponda alle comunicazioni
+3. Clicca **Esegui**
+4. Appare un riepilogo di tutti i giocatori assicurati per squadra
+5. Verifica che corrisponda alle comunicazioni
 
 ### Passo 7: Salva
 1. Chiudi l'editor VBA (Alt+Q o X)
@@ -129,8 +132,9 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 
 ### Passo 1: Apri il file DB
 1. Apri `FantaMantra Manageriale - DB completo (06.02.2026).xlsx`
-2. Password: `89y3R8HF'(()h7t87gH)(/0?9U38Qyp99`
-3. Abilita contenuto se richiesto
+2. Abilita contenuto se richiesto
+
+> **Nota**: il file si apre senza password. La password di protezione fogli e' gestita automaticamente dalla macro.
 
 ### Passo 2: Apri l'editor VBA
 1. Premi **Alt+F11**
@@ -142,10 +146,11 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
 3. Incolla (Ctrl+V) nel modulo vuoto
 
 ### Passo 4: Esegui la macro principale
-1. Premi **F5**
-2. Seleziona **ESEGUI_TUTTO_FM**
-3. Clicca **Esegui**
-4. **Seleziona il file listone** quando appare la finestra di selezione file
+1. **Torna in Excel** (chiudi o minimizza l'editor VBA con Alt+Q o cliccando la X)
+2. Premi **Alt+F8** (finestra Visualizza macro)
+3. Seleziona **ESEGUI_TUTTO_FM**
+4. Clicca **Esegui**
+5. **Seleziona il file listone** quando appare la finestra di selezione file
 5. La macro esegue in sequenza le 9 fasi:
    - Aggiornamento LISTA dal listone (quotazioni Mantra) + delistati a 601+ + date nascita
    - Svincoli (rosa attiva -> elenco storico)
@@ -172,8 +177,10 @@ Le macro correggono automaticamente 3 bug individuati nel foglio DB:
    - **FASE 8**: Per ogni squadra: quota EUR con dettaglio per giocatore + `TOTALE`
 
 ### Passo 6: Verifica
-1. Premi **F5** > seleziona **VerificaAssicuratiFM**
-2. Confronta con le comunicazioni
+1. Premi **Alt+F8** (finestra Visualizza macro)
+2. Seleziona **VerificaAssicuratiFM**
+3. Clicca **Esegui**
+4. Confronta con le comunicazioni
 
 ### Passo 7: Salva
 1. Chiudi VBA (Alt+Q)

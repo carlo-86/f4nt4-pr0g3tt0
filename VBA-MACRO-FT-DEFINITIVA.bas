@@ -47,11 +47,30 @@ Sub ESEGUI_TUTTO_FT()
     Log "Protezione fogli rimossa dove necessario"
     Log ""
 
+    ' SALVA QUOTAZIONI 06/02 da LISTA prima dell'aggiornamento
+    ' (servono in FASE 2 per Qt all'acquisto e FVM dei nuovi giocatori)
+    Dim wsLista As Worksheet
+    Set wsLista = ThisWorkbook.Sheets("LISTA")
+    Dim dictQuot As Object
+    Set dictQuot = CreateObject("Scripting.Dictionary")
+    Dim dqR As Long
+    For dqR = 2 To 600
+        Dim dqName As String
+        dqName = NormName(CStr(wsLista.Cells(dqR, 2).Value))
+        If dqName <> "" Then
+            ' Array: (0)=Ruolo Classic, (1)=Qt.Attuale, (2)=FVM
+            dictQuot(dqName) = Array( _
+                UCase(Trim(CStr(wsLista.Cells(dqR, 3).Value))), _
+                wsLista.Cells(dqR, 6).Value, _
+                wsLista.Cells(dqR, 8).Value)
+        End If
+    Next dqR
+    Log "Salvate " & dictQuot.Count & " quotazioni pre-aggiornamento da LISTA"
+    Log ""
+
     ' FASE 0: Aggiorna LISTA dal listone (+ delistati a 601+ e date nascita)
     Log "FASE 0: Aggiornamento LISTA dal listone"
     Log "-------------------------------------------"
-    Dim wsLista As Worksheet
-    Set wsLista = ThisWorkbook.Sheets("LISTA")
     AggiornaListone wsLista, False  ' False = Classic (FT)
 
     Dim wsSq As Worksheet
@@ -67,7 +86,7 @@ Sub ESEGUI_TUTTO_FT()
     Log ""
     Log "FASE 2: Inserimento giocatori asta riparazione"
     Log "-------------------------------------------"
-    InserisciAstaRiparazione wsSq
+    InserisciAstaRiparazione wsSq, dictQuot
 
     ' FASE 3: Riordinamento SQUADRE per reparto/spesa
     Log ""
@@ -127,7 +146,11 @@ Sub ESEGUI_TUTTO_FT()
     End If
     On Error GoTo 0
     wsLog.Cells.Clear
-    wsLog.Cells(1, 1).Value = logText
+    Dim logLines() As String, logR As Long
+    logLines = Split(logText, vbCrLf)
+    For logR = 0 To UBound(logLines)
+        wsLog.Cells(logR + 1, 1).Value = logLines(logR)
+    Next logR
 
     MsgBox "Operazioni FT completate!" & vbCrLf & _
            "Controlla il foglio LOG_MACRO per i dettagli.", _
@@ -354,7 +377,18 @@ Private Sub AggiornaListone(wsLista As Worksheet, isMantra As Boolean)
     Dim etaR As Long
     For etaR = 2 To lastListaRow
         If Trim(CStr(wsLista.Cells(etaR, 2).Value)) <> "" Then
-            If IsEmpty(wsLista.Cells(etaR, 9).Value) Or wsLista.Cells(etaR, 9).Value = "" Then
+            Dim etaVal As Variant
+            etaVal = wsLista.Cells(etaR, 9).Value
+            Dim needsEta As Boolean
+            needsEta = False
+            If IsEmpty(etaVal) Then
+                needsEta = True
+            ElseIf IsError(etaVal) Then
+                needsEta = True
+            ElseIf etaVal = "" Then
+                needsEta = True
+            End If
+            If needsEta Then
                 wsLista.Cells(etaR, 9).Formula = _
                     "=IFERROR(VLOOKUP(B" & etaR & ",$L:$N,3,FALSE),"""")"
             End If
@@ -834,52 +868,64 @@ End Function
 ' ============================================================
 ' FASE 2: Inserisci giocatori acquisiti nell'asta riparazione
 ' ============================================================
-Private Sub InserisciAstaRiparazione(ws As Worksheet)
-    ' --- HELLAS MADONNA (col 15) ---
-    InserisciGiocatore ws, 15, "Circati", "Par", 1
-    InserisciGiocatore ws, 15, "Berisha M", "Lec", 1
-    InserisciGiocatore ws, 15, "Durosinmi", "Ven", 3
-
-    ' --- PARTIZAN (col 39) ---
-    InserisciGiocatore ws, 39, "Belghali", "Ver", 7
-    InserisciGiocatore ws, 39, "Strefezza", "Par", 29
-    InserisciGiocatore ws, 39, "Przyborek", "Com", 1
+Private Sub InserisciAstaRiparazione(ws As Worksheet, dictQuot As Object)
+    ' 38 giocatori totali - date da "Mercato ASTA CLASSICA"
+    ' Formato: InserisciGiocatore ws, colCalc, nome, spesa, dataAcquisto, dictQuot
+    ' NON scrive Ruolo (+1) e Squadra (+2): sono formule CERCA.VERT
+    ' Scrive: Nome (+0), DataAcq (+4), Qt.Acq (+5), FVM (+6), "/" (+8), Spesa (+10)
 
     ' --- KUNG FU PANDEV (col 63) ---
-    InserisciGiocatore ws, 63, "Malen", "Ata", 173
-    InserisciGiocatore ws, 63, "Vergara", "Laz", 31
-    ' NOTA: Kouame' NON inserito - non piu' listato, non assicurabile
+    InserisciGiocatore ws, 63, "Malen", 173, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 63, "Vergara", 31, DateSerial(2026, 2, 11), dictQuot
 
     ' --- FC CKC 26 (col 87) ---
-    InserisciGiocatore ws, 87, "Tiago Gabriel", "Pis", 1
-    InserisciGiocatore ws, 87, "Vaz", "Par", 3
-    InserisciGiocatore ws, 87, "Muharemovic", "Ven", 3
-    InserisciGiocatore ws, 87, "Baldanzi", "Rom", 3
-    InserisciGiocatore ws, 87, "Santos A", "Nap", 1
-    InserisciGiocatore ws, 87, "Bijlow", "Fio", 2
-    InserisciGiocatore ws, 87, "Bernasconi", "Ata", 1
+    InserisciGiocatore ws, 87, "Kone' I.", 16, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 87, "Bijlow", 2, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 87, "Bernasconi", 1, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 87, "Santos A.", 1, DateSerial(2026, 2, 12), dictQuot
+    InserisciGiocatore ws, 87, "Baldanzi", 3, DateSerial(2026, 2, 12), dictQuot
+    InserisciGiocatore ws, 87, "Muharemovic", 3, DateSerial(2026, 2, 12), dictQuot
+    InserisciGiocatore ws, 87, "Vaz", 3, DateSerial(2026, 2, 12), dictQuot
+    InserisciGiocatore ws, 87, "Tiago Gabriel", 1, DateSerial(2026, 2, 12), dictQuot
+
+    ' --- HELLAS MADONNA (col 15) ---
+    InserisciGiocatore ws, 15, "Moreo", 1, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 15, "Durosinmi", 3, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 15, "Berisha M.", 1, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 15, "Sportiello", 1, DateSerial(2026, 2, 12), dictQuot
+    InserisciGiocatore ws, 15, "Circati", 1, DateSerial(2026, 2, 12), dictQuot
 
     ' --- MUTTLEY SUPERSTAR (col 27) ---
-    InserisciGiocatore ws, 27, "Ostigard", "Gen", 2
-    InserisciGiocatore ws, 27, "Luis Henrique", "Int", 17
-    InserisciGiocatore ws, 27, "Solomon", "Tor", 21
+    InserisciGiocatore ws, 27, "Solomon", 21, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 27, "Ostigard", 2, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 27, "Luis Henrique", 17, DateSerial(2026, 2, 12), dictQuot
 
     ' --- MILLWALL (col 75) ---
-    InserisciGiocatore ws, 75, "Celik", "Rom", 2
-    InserisciGiocatore ws, 75, "Ratkov", "Laz", 2
-    InserisciGiocatore ws, 75, "Zaragoza", "Mon", 46
-    InserisciGiocatore ws, 75, "Perrone", "Mon", 9
-    InserisciGiocatore ws, 75, "Paleari", "Cag", 1
-    InserisciGiocatore ws, 75, "Boga", "Niz", 1
+    InserisciGiocatore ws, 75, "Zaragoza", 46, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 75, "Muric", 21, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 75, "Perrone", 9, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 75, "Celik", 2, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 75, "Ratkov", 2, DateSerial(2026, 2, 12), dictQuot
+    InserisciGiocatore ws, 75, "Boga", 1, DateSerial(2026, 2, 13), dictQuot
+    InserisciGiocatore ws, 75, "Paleari", 1, DateSerial(2026, 2, 13), dictQuot
 
     ' --- LEGENDA AUREA (col 51) ---
-    InserisciGiocatore ws, 51, "Bartesaghi", "Mil", 3
-    InserisciGiocatore ws, 51, "Taylor K", "Laz", 42
-    InserisciGiocatore ws, 51, "Fagioli", "Fio", 1
-    InserisciGiocatore ws, 51, "Ekkelenkamp", "Gen", 4
-    InserisciGiocatore ws, 51, "Miretti", "Gen", 1
-    InserisciGiocatore ws, 51, "Bonazzoli", "Cre", 2
-    InserisciGiocatore ws, 51, "Raspadori", "Ata", 50
+    InserisciGiocatore ws, 51, "Raspadori", 50, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Taylor K.", 42, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Vitinha O.", 5, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Bartesaghi", 3, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Bonazzoli", 2, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Ekkelenkamp", 4, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Fagioli", 1, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 51, "Miretti", 1, DateSerial(2026, 2, 12), dictQuot
+
+    ' --- PARTIZAN (col 39) ---
+    InserisciGiocatore ws, 39, "Strefezza", 29, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 39, "Belghali", 7, DateSerial(2026, 2, 11), dictQuot
+    InserisciGiocatore ws, 39, "Przyborek", 1, DateSerial(2026, 2, 11), dictQuot
+
+    ' --- A.S. TRONZANO (col 111) ---
+    InserisciGiocatore ws, 111, "Fullkrug", 2, DateSerial(2026, 2, 11), dictQuot
 End Sub
 
 ' ============================================================
@@ -1015,7 +1061,10 @@ Private Sub OrdinaSezione(ws As Worksheet, colCalc As Long, firstRow As Long, la
         Next j
     Next i
 
-    ' Riscrivi dati ordinati, poi svuota righe in eccesso
+    ' Separa eventuali celle unite e riscrivi dati ordinati
+    ' On Error Resume Next per gestire celle unite residue o protette
+    On Error Resume Next
+    ws.Range(ws.Cells(firstRow, colCalc), ws.Cells(lastRow, colCalc + 10)).UnMerge
     idx = 0
     For r = firstRow To lastRow
         idx = idx + 1
@@ -1029,6 +1078,7 @@ Private Sub OrdinaSezione(ws As Worksheet, colCalc As Long, firstRow As Long, la
             Next c
         End If
     Next r
+    On Error GoTo 0
 End Sub
 
 ' ============================================================
@@ -1236,7 +1286,11 @@ Sub CorreggiFormuleDB_FT()
     End If
     On Error GoTo 0
     wsLog.Cells.Clear
-    wsLog.Cells(1, 1).Value = logText
+    Dim logLines() As String, logR As Long
+    logLines = Split(logText, vbCrLf)
+    For logR = 0 To UBound(logLines)
+        wsLog.Cells(logR + 1, 1).Value = logLines(logR)
+    Next logR
 
     MsgBox "Correzione formule DB completata!" & vbCrLf & _
            "Controlla il foglio LOG_MACRO per i dettagli.", _
@@ -1244,34 +1298,144 @@ Sub CorreggiFormuleDB_FT()
 End Sub
 
 ' ============================================================
-' Helper: Inserisci un giocatore nuovo in SQUADRE
+' Helper: Normalizza un nome (uppercase, senza accenti/apostrofi/punti)
 ' ============================================================
-Private Sub InserisciGiocatore(ws As Worksheet, colCalc As Long, nome As String, squadraSerieA As String, spesa As Long)
+Private Function NormName(ByVal s As String) As String
+    Dim n As String
+    n = UCase(Trim(s))
+    n = Replace(n, "'", "")
+    n = Replace(n, ".", "")
+    n = Replace(n, Chr(232), "E")  ' e-grave
+    n = Replace(n, Chr(233), "E")  ' e-acuto
+    n = Replace(n, Chr(236), "I")  ' i-grave
+    n = Replace(n, Chr(237), "I")  ' i-acuto
+    n = Replace(n, Chr(242), "O")  ' o-grave
+    n = Replace(n, Chr(243), "O")  ' o-acuto
+    n = Replace(n, Chr(224), "A")  ' a-grave
+    n = Replace(n, Chr(225), "A")  ' a-acuto
+    n = Replace(n, Chr(249), "U")  ' u-grave
+    n = Replace(n, Chr(250), "U")  ' u-acuto
+    NormName = n
+End Function
+
+' ============================================================
+' Helper: Inserisci un giocatore nella sezione corretta di SQUADRE
+' - Trova la sezione per reparto (P/D/C/A) tramite lookup in dictQuot
+' - NON scrive +1 (Ruolo) e +2 (Squadra): contengono formule CERCA.VERT
+' - Scrive: +0 Nome, +4 Data acquisto, +5 Qt.acq, +6 FVM, +8 "/", +10 Spesa
+' ============================================================
+Private Sub InserisciGiocatore(ws As Worksheet, colCalc As Long, nome As String, spesa As Long, dataAcq As Date, dictQuot As Object)
+    Dim nomeUp As String
+    nomeUp = UCase(Trim(nome))
+    Dim lookupKey As String
+    lookupKey = NormName(nome)
+
+    ' 1. Verifica se il giocatore esiste gia' (righe 6-52, tutte le sezioni)
     Dim r As Long
-    For r = 6 To 50
+    For r = 6 To 52
         Dim existName As String
         existName = Trim(CStr(ws.Cells(r, colCalc).Value))
-        If UCase(Replace(existName, "'", "")) Like "*" & UCase(Replace(Left(nome, 5), "'", "")) & "*" Then
-            Log "  GIA' PRESENTE: " & nome & " (riga " & r & ", come '" & existName & "')"
-            If ws.Cells(r, colCalc + 10).Value <> spesa Then
-                ws.Cells(r, colCalc + 10).Value = spesa
-                Log "    -> Spesa aggiornata a " & spesa
+        If existName <> "" Then
+            If NormName(existName) = lookupKey Then
+                Log "  GIA' PRESENTE: " & nome & " (riga " & r & ", come '" & existName & "')"
+                ' Aggiorna spesa se diversa
+                If ws.Cells(r, colCalc + 10).Value <> spesa Then
+                    ws.Cells(r, colCalc + 10).Value = spesa
+                    Log "    -> Spesa aggiornata a " & spesa
+                End If
+                ' Compila dati mancanti se vuoti
+                Dim cv4 As Variant: cv4 = ws.Cells(r, colCalc + 4).Value
+                If IsEmpty(cv4) Or cv4 = "" Or (IsNumeric(cv4) And CLng(cv4) = 0) Then
+                    ws.Cells(r, colCalc + 4).Value = CLng(dataAcq)
+                    Log "    -> Data acquisto compilata"
+                End If
+                If IsEmpty(ws.Cells(r, colCalc + 8).Value) Or ws.Cells(r, colCalc + 8).Value = "" Then
+                    ws.Cells(r, colCalc + 8).Value = "/"
+                End If
+                ' Qt e FVM da dictQuot se mancanti
+                If dictQuot.Exists(lookupKey) Then
+                    Dim cv5 As Variant: cv5 = ws.Cells(r, colCalc + 5).Value
+                    If IsEmpty(cv5) Or cv5 = "" Or (IsNumeric(cv5) And CLng(cv5) = 0) Then
+                        ws.Cells(r, colCalc + 5).Value = dictQuot(lookupKey)(1)
+                        Log "    -> Qt.acq compilata"
+                    End If
+                    Dim cv6 As Variant: cv6 = ws.Cells(r, colCalc + 6).Value
+                    If IsEmpty(cv6) Or cv6 = "" Or (IsNumeric(cv6) And CLng(cv6) = 0) Then
+                        ws.Cells(r, colCalc + 6).Value = dictQuot(lookupKey)(2)
+                        Log "    -> FVM compilato"
+                    End If
+                End If
+                Exit Sub
             End If
-            Exit Sub
         End If
     Next r
 
-    For r = 6 To 50
+    ' 2. Lookup ruolo (P/D/C/A), Qt, FVM da dictQuot
+    Dim ruolo As String, qtAcq As Variant, fvm As Variant
+    ruolo = ""
+    qtAcq = Empty
+    fvm = Empty
+    If dictQuot.Exists(lookupKey) Then
+        ruolo = CStr(dictQuot(lookupKey)(0))  ' Ruolo Classic
+        qtAcq = dictQuot(lookupKey)(1)         ' Qt.Attuale
+        fvm = dictQuot(lookupKey)(2)           ' FVM
+    Else
+        Log "  ATTENZIONE: " & nome & " non trovato in LISTA - ruolo/Qt/FVM non disponibili"
+    End If
+
+    ' 3. Trova le sezioni per reparto contando gli header "Calciatore"
+    ' FT: 1a occorrenza=P, 2a=D, 3a=C, 4a=A
+    Dim hdrRows(1 To 4) As Long
+    Dim hCount As Long: hCount = 0
+    For r = 5 To 52
+        If Trim(CStr(ws.Cells(r, colCalc).Value)) = "Calciatore" Then
+            hCount = hCount + 1
+            If hCount <= 4 Then hdrRows(hCount) = r
+        End If
+    Next r
+
+    Dim targetSec As Long: targetSec = 0
+    Select Case UCase(Left(ruolo, 1))
+        Case "P": targetSec = 1
+        Case "D": targetSec = 2
+        Case "C": targetSec = 3
+        Case "A": targetSec = 4
+    End Select
+
+    If targetSec = 0 Or targetSec > hCount Then
+        Log "  ERRORE: Ruolo '" & ruolo & "' non valido per " & nome & " (col " & colCalc & ")"
+        Exit Sub
+    End If
+
+    ' 4. Trova una riga vuota nella sezione corretta
+    Dim secStart As Long, secEnd As Long
+    secStart = hdrRows(targetSec) + 1
+    If targetSec < hCount Then
+        secEnd = hdrRows(targetSec + 1) - 1
+    Else
+        secEnd = 52
+    End If
+
+    For r = secStart To secEnd
         If Trim(CStr(ws.Cells(r, colCalc).Value)) = "" Then
-            ws.Cells(r, colCalc).Value = nome
-            ws.Cells(r, colCalc + 1).Value = squadraSerieA
-            ws.Cells(r, colCalc + 10).Value = spesa
-            Log "  INSERITO: " & nome & " (" & squadraSerieA & ", Sp=" & spesa & ") -> riga " & r
+            ' Scrivi dati giocatore
+            ws.Cells(r, colCalc).Value = nomeUp              ' +0: Nome (UPPERCASE)
+            ' +1 (Ruolo) e +2 (Squadra): NON toccare - formule CERCA.VERT
+            ws.Cells(r, colCalc + 4).Value = CLng(dataAcq)   ' +4: Data acquisto (serial)
+            If Not IsEmpty(qtAcq) Then
+                ws.Cells(r, colCalc + 5).Value = qtAcq        ' +5: Qt all'acquisto
+            End If
+            If Not IsEmpty(fvm) Then
+                ws.Cells(r, colCalc + 6).Value = fvm          ' +6: FVM Prop. all'acquisto
+            End If
+            ws.Cells(r, colCalc + 8).Value = "/"              ' +8: Qt rinn ass
+            ws.Cells(r, colCalc + 10).Value = spesa           ' +10: Spesa
+            Log "  INSERITO: " & nomeUp & " (Sp=" & spesa & ", Sez=" & Choose(targetSec, "P", "D", "C", "A") & ") -> riga " & r
             Exit Sub
         End If
     Next r
 
-    Log "  ERRORE: Nessuna riga vuota per " & nome & " nella colonna " & colCalc
+    Log "  ERRORE: Nessuna riga vuota nella sezione " & Choose(targetSec, "P", "D", "C", "A") & " per " & nome & " (col " & colCalc & ")"
 End Sub
 
 ' ============================================================
