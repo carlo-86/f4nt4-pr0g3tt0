@@ -1420,7 +1420,12 @@ Private Sub InserisciGiocatore(ws As Worksheet, colCalc As Long, nome As String,
         If Trim(CStr(ws.Cells(r, colCalc).Value)) = "" Then
             ' Scrivi dati giocatore
             ws.Cells(r, colCalc).Value = nomeUp              ' +0: Nome (UPPERCASE)
-            ' +1 (Ruolo) e +2 (Squadra): NON toccare - formule CERCA.VERT
+            ' +1: Ruolo (CERCA.VERT da LISTA col C = Ruolo Classic P/D/C/A)
+            ' +2: Squadra (CERCA.VERT da LISTA col E)
+            Dim nameAddr As String
+            nameAddr = ws.Cells(r, colCalc).Address(False, False)
+            ws.Cells(r, colCalc + 1).Formula = "=IFERROR(VLOOKUP(" & nameAddr & ",LISTA!$B:$C,2,FALSE),"""")"
+            ws.Cells(r, colCalc + 2).Formula = "=IFERROR(VLOOKUP(" & nameAddr & ",LISTA!$B:$E,4,FALSE),"""")"
             ws.Cells(r, colCalc + 4).Value = CLng(dataAcq)   ' +4: Data acquisto (serial)
             If Not IsEmpty(qtAcq) Then
                 ws.Cells(r, colCalc + 5).Value = qtAcq        ' +5: Qt all'acquisto

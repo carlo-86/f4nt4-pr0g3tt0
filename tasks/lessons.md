@@ -48,3 +48,7 @@ Dopo ogni correzione, Claude Code aggiunge una voce nel formato:
 4. La Data acquisto dell'asta riparazione NON è una data fissa — ogni giocatore ha la sua data specifica dal "Mercato ASTA CLASSICA"
 5. Q. all'acquisto = quotazione attuale dal listone del 06/02/2026 (dal DB originale pre-modifica)
 6. FVM Prop. all'acquisto = FVM dal DB del 06/02/2026
+
+### 24/02/2026 — Le formule CERCA.VERT non esistono nelle righe vuote
+**Cosa è successo**: Pensavo che le colonne Ruolo (+1) e Squadra (+2) nel foglio SQUADRE avessero formule CERCA.VERT pre-compilate in tutte le righe, e che bastasse scrivere il nome del calciatore per farle "auto-popolare". In realtà le formule esistono solo nelle righe dove c'è già un calciatore; le righe vuote non hanno nessuna formula.
+**Regola per il futuro**: Quando si inserisce un nuovo calciatore in una riga vuota di SQUADRE, bisogna ANCHE scrivere le formule CERCA.VERT per Ruolo (+1) e Squadra (+2). FT: Ruolo=VLOOKUP da LISTA col C (Classic); FM: Ruolo=VLOOKUP da LISTA col D (Mantra). Squadra=VLOOKUP da LISTA col E per entrambi.
